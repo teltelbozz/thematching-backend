@@ -1,47 +1,67 @@
-
 import { SignJWT, jwtVerify, JWTPayload } from 'jose';
 import { config } from '../config/index.js';
+import { Request } from 'express';
 
-type AccessClaims = JWTPayload & { uid: number };
-type RefreshClaims = JWTPayload & { uid: number; rot?: number };
+// ===== util =====
 
-const ACCESS_SECRET = new TextEncoder().encode(config.jwt.accessSecret);
-const REFRESH_SECRET = new TextEncoder().encode(config.jwt.refreshSecret);
-
-export async function signAccess(uid: number) {
-  const now = Math.floor(Date.now()/1000);
-  return await new SignJWT({ uid } as AccessClaims)
-    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
-    .setIssuedAt(now)
-    .setExpirationTime(now + config.jwt.accessTtlSec)
-    .sign(ACCESS_SECRET);
+// Bearer ヘッダから JWT を取り出す
+export function readBearer(req: Request): string | null {
+  const h = req.headers['authorization'];
+  if (!h) return null;
+  const m = /^Bearer (.+)$/i.exec(h);
+  return m ? m[1] : null;
 }
 
-export async function signRefresh(uid: number, rot=0) {
-  const now = Math.floor(Date.now()/1000);
-  return await new SignJWT({ uid, rot } as RefreshClaims)
-    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
-    .setIssuedAt(now)
-    .setExpirationTime(now + config.jwt.refreshTtlSec)
-    .sign(REFRESH_SECRET);
+// Cookie から値を取り出す
+export function readCookie(req: Request, name: string): string | null {
+  const h = req.headers['cookie'];
+  if (!h) return null;
+  const m = new RegExp(`${name}=([^;]+)`).exec(h);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+// ===== token service =====
+
+// access token (短期)
+export async function signAccess(uid: number | string): Promise<string> {
+  return await new SignJWT({ uid })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(`${config.jwt.accessTtlSec}s`)
+    .sign(new TextEncoder().encode(config.jwt.accessSecret));
 }
 
 export async function verifyAccess(token: string) {
-  return await jwtVerify(token, ACCESS_SECRET, { algorithms:['HS256'], clockTolerance: 60 });
+  return await jwtVerify(token, new TextEncoder().encode(config.jwt.accessSecret), {
+    algorithms: ['HS256'],
+  });
+}
+
+// refresh token (長期)
+export async function signRefresh(uid: number | string, rot: number): Promise<string> {
+  return await new SignJWT({ uid, rot })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setExpirationTime(`${config.jwt.refreshTtlSec}s`)
+    .sign(new TextEncoder().encode(config.jwt.refreshSecret));
 }
 
 export async function verifyRefresh(token: string) {
-  return await jwtVerify(token, REFRESH_SECRET, { algorithms:['HS256'], clockTolerance: 300 });
+  return await jwtVerify(token, new TextEncoder().encode(config.jwt.refreshSecret), {
+    algorithms: ['HS256'],
+  });
 }
 
-export function readBearer(req: any): string | undefined {
-  const b = String(req.headers?.authorization || '');
-  return b.startsWith('Bearer ') ? b.slice(7) : undefined;
-}
+// ===== helper =====
 
-export function readCookie(req: any, name: string): string | undefined {
-  const raw = req.headers?.cookie;
-  if (!raw) return;
-  const target = raw.split(';').map((s: string)=>s.trim()).find((s)=>s.startsWith(name+'='));
-  return target ? decodeURIComponent(target.split('=')[1]) : undefined;
+// base64url encode（必要に応じて利用）
+export function base64url(input: string): string {
+  return Buffer.from(input, 'base64')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+    .split('')
+    .map((s: string) => s.charCodeAt(0).toString(16)) // ★型を追加
+    .join('');
 }
