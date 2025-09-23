@@ -9,6 +9,10 @@ import chatsRouter from './routes/chats.js';
 import reviewsRouter from './routes/reviews.js';
 import authRouter from './routes/auth.js';
 import devAuth from './middleware/devAuth.js';
+// ユーザ登録追加分(0923)
+import profileRouter from './routes/profile.js';
+import verifyRouter from './routes/verify.js';
+import paymentsRouter from './routes/payments.js';
 
 import { config } from './config/index.js';
 const app = express();
@@ -64,5 +68,10 @@ app.use('/api/slots', slotsRouter);
 app.use('/api/matches', matchesRouter);
 app.use('/api/chats', chatsRouter);
 app.use('/api/reviews', reviewsRouter);
+
+// ユーザ登録追加分(0923)
+app.use('/api/profile', profileRouter);
+app.use('/api/verify', verifyRouter);
+app.use('/api/payments', paymentsRouter);
 
 export default app;
