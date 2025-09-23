@@ -1,3 +1,5 @@
 # .gitignoreファイルに追加
 .DS_Store
-
+.env
+.gitignore
+.env
