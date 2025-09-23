@@ -27,11 +27,25 @@ app.set('trust proxy', 1);
  * CORS 設定（Cookie を伴うクロスサイト通信を許可）
  * - origin はワイルドカード不可（credentials:true と共存できない）
  */
+function parseOrigins(v: string) {
+  return v.split(',').map(s => s.trim()).filter(Boolean);
+}
+const ALLOW = parseOrigins(process.env.FRONT_ORIGIN || config.frontOrigin);
+
 const corsOptions: cors.CorsOptions = {
-  origin: config.frontOrigin,
-  credentials: true, // ← refresh/login で Cookie を使うため
-  methods: config.corsMethods as any,
+  origin(origin, cb) {
+    if (!origin) return cb(null, true); // 同一オリジン/ネイティブ
+    const ok = ALLOW.includes(origin) || ALLOW.some(p => {
+      if (p.endsWith('*')) return origin.startsWith(p.slice(0, -1));
+      if (p.startsWith('*.')) return origin.endsWith(p.slice(1));
+      return false;
+    });
+    return (ok || ALLOW.includes(origin)) ? cb(null, true) : cb(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization'],
+  maxAge: 86400,
 };
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
