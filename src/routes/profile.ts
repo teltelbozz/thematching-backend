@@ -15,8 +15,6 @@ router.get('/', async (req, res) => {
   try {
     const token = readBearer(req);
     if (!token) return res.status(401).json({ error: 'unauthenticated' });
-    //本番では消す
-    console.log('[debug] bearer head =', (readBearer(req)||'').split('.')[0]);
     const { payload } = await verifyAccess(token);
     const uid = normalizeUid((payload as any).uid);
     if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
