@@ -18,6 +18,10 @@ import paymentsRouter from './routes/payments.js';
 import prefsRouter from './routes/prefs.js';
 import calendarRouter from './routes/calendar.js';
 
+//設定(0929)
+import setupRouter from './routes/setup.js';
+
+
 import { config } from './config/index.js';
 
 const app = express();
@@ -82,5 +86,8 @@ app.use('/api/payments', paymentsRouter);
 // プリファレンス追加分(0928)
 app.use('/api/prefs', prefsRouter);
 app.use('/api/calendar', calendarRouter);
+
+//設定画面(0928)
+app.use('/api/setup', setupRouter);
 
 export default app;
