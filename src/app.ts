@@ -14,7 +14,12 @@ import profileRouter from './routes/profile.js';
 import verifyRouter from './routes/verify.js';
 import paymentsRouter from './routes/payments.js';
 
+// プリファレンス追加分(0928)
+import prefsRouter from './routes/prefs.js';
+import calendarRouter from './routes/calendar.js';
+
 import { config } from './config/index.js';
+
 const app = express();
 
 /**
@@ -73,5 +78,9 @@ app.use('/api/reviews', reviewsRouter);
 app.use('/api/profile', profileRouter);
 app.use('/api/verify', verifyRouter);
 app.use('/api/payments', paymentsRouter);
+
+// プリファレンス追加分(0928)
+app.use('/api/prefs', prefsRouter);
+app.use('/api/calendar', calendarRouter);
 
 export default app;
