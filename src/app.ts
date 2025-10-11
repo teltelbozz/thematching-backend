@@ -1,93 +1,67 @@
 import express from 'express';
 import cors from 'cors';
+import morgan from 'morgan';
 
-// ★ ESM 実行では import に拡張子 .js を必ず付ける
-import healthRouter from './routes/health.js';
-import slotsRouter from './routes/slots.js';
-import matchesRouter from './routes/matches.js';
-import chatsRouter from './routes/chats.js';
-import reviewsRouter from './routes/reviews.js';
-import authRouter from './routes/auth.js';
-import devAuth from './middleware/devAuth.js';
-// ユーザ登録追加分(0923)
-import profileRouter from './routes/profile.js';
-import verifyRouter from './routes/verify.js';
-import paymentsRouter from './routes/payments.js';
+import { devAuth } from './middleware/devAuth';
 
-// プリファレンス追加分(0928)
-import prefsRouter from './routes/prefs.js';
-import calendarRouter from './routes/calendar.js';
-
-//設定(0929)
-import setupRouter from './routes/setup.js';
-
-
-import { config } from './config/index.js';
+// 既存のルート群（実装済みのものだけ import してください）
+import authRoutes from './routes/auth';
+import profileRoutes from './routes/profile';
+import prefsRoutes from './routes/prefs';
+import setupRoutes from './routes/setup';
+// もし他にもあればここで import
+// import slotsRoutes from './routes/slots';
+// import matchesRoutes from './routes/matches';
+// import chatsRoutes from './routes/chats';
 
 const app = express();
 
-/**
- * フロントエンドの URL（CORS 許可先）
- * 必要に応じて Vercel の Environment Variables FRONT_ORIGIN で上書きできます
- */
-const FRONT_ORIGIN =
-  process.env.FRONT_ORIGIN || 'https://thematching-frontend.vercel.app';
-
-// Vercel 経由で Secure Cookie を扱うために必須
+// 逆プロキシ（Vercel/Proxy）前提なら
 app.set('trust proxy', 1);
 
-/**
- * CORS 設定（Cookie を伴うクロスサイト通信を許可）
- * - origin はワイルドカード不可（credentials:true と共存できない）
- */
-function parseOrigins(v: string) {
-  return v.split(',').map(s => s.trim()).filter(Boolean);
-}
-const ALLOW = parseOrigins(process.env.FRONT_ORIGIN || config.frontOrigin);
+// ログ
+app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-const corsOptions: cors.CorsOptions = {
-  origin(origin, cb) {
-    if (!origin) return cb(null, true); // 同一オリジン/ネイティブ
-    const ok = ALLOW.includes(origin) || ALLOW.some(p => {
-      if (p.endsWith('*')) return origin.startsWith(p.slice(0, -1));
-      if (p.startsWith('*.')) return origin.endsWith(p.slice(1));
-      return false;
-    });
-    return (ok || ALLOW.includes(origin)) ? cb(null, true) : cb(new Error(`CORS blocked: ${origin}`));
-  },
+// CORS
+app.use(cors({
+  origin: process.env.FRONT_ORIGIN, // 例: https://thematching-frontend.vercel.app
   credentials: true,
-  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
-  allowedHeaders: ['Content-Type','Authorization'],
-  maxAge: 86400,
-};
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+}));
 
-app.use(express.json());
+// Body
+app.use(express.json({ limit: '1mb' }));
 
-// 開発用の devAuth（環境変数 DEV_FAKE_AUTH=1 のときのみ有効）
-if (devAuth) {
-  app.use(devAuth);
-}
+// devAuth（※必ず /api/* ルートより前に）
+app.use(devAuth);
 
-// ルーター登録
-app.use('/api/health', healthRouter);
-app.use('/api/auth', authRouter);
-app.use('/api/slots', slotsRouter);
-app.use('/api/matches', matchesRouter);
-app.use('/api/chats', chatsRouter);
-app.use('/api/reviews', reviewsRouter);
+// ---- ヘルスチェック ----
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true });
+});
+app.get('/api/health/ping', (_req, res) => {
+  res.type('text').send('pong');
+});
 
-// ユーザ登録追加分(0923)
-app.use('/api/profile', profileRouter);
-app.use('/api/verify', verifyRouter);
-app.use('/api/payments', paymentsRouter);
+// ---- 既存APIルート ----
+app.use('/api/auth', authRoutes);
+app.use('/api/profile', profileRoutes);
+app.use('/api/prefs', prefsRoutes);
+app.use('/api/setup', setupRoutes);
+// app.use('/api/slots', slotsRoutes);
+// app.use('/api/matches', matchesRoutes);
+// app.use('/api/chats', chatsRoutes);
 
-// プリファレンス追加分(0928)
-app.use('/api/prefs', prefsRouter);
-app.use('/api/calendar', calendarRouter);
+// 404
+app.use((req, res) => {
+  res.status(404).json({ error: 'not_found', path: req.path });
+});
 
-//設定画面(0928)
-app.use('/api/setup', setupRouter);
+// エラーハンドラ
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('[app:error]', err);
+  const status = err?.status || 500;
+  res.status(status).json({ error: 'server_error', message: err?.message || 'internal_error' });
+});
 
 export default app;
