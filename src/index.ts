@@ -2,6 +2,17 @@
 // 役割：DB(Pool) を初期化して app.locals.db にセット → 環境に応じて export or listen
 // ESM 実行前提（package.json の "type":"module"）。import の拡張子に .js を付けること。
 
+// src/index.ts
+import 'dotenv/config';
+import dotenv from 'dotenv';
+import fs from 'fs';
+
+// .env.local を優先して上書き（開発時のみ）
+if (process.env.NODE_ENV !== 'production' && fs.existsSync('.env.local')) {
+  dotenv.config({ path: '.env.local', override: true });
+  console.log('[env] loaded .env.local (override)');
+}
+
 import { Pool } from 'pg';
 import app from './app';
 

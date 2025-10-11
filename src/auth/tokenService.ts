@@ -54,13 +54,6 @@ export async function verifyRefresh(token: string) {
 
 // ===== helper =====
 
-
-
-
-
-// ===== デバッグ用 =====
-// ===== デバッグ用 =====
-// ===== デバッグ用 =====
 // base64url encode（必要に応じて利用）
 export function base64url(input: string): string {
   return Buffer.from(input, 'base64')
