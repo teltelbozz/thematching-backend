@@ -1,67 +1,51 @@
-import { SignJWT, jwtVerify, JWTPayload } from 'jose';
-import { config } from '../config/index.js';
-import { Request } from 'express';
+// src/auth/tokenService.ts
+import type { Request } from 'express';
+import config from '../config';
 
-// ===== util =====
+// jose は ESM 専用なので動的 import を使う（CJSビルドでもOK）
+const loadJose = () => import('jose');
 
-// Bearer ヘッダから JWT を取り出す
-export function readBearer(req: Request): string | null {
-  const h = req.headers['authorization'];
-  if (!h) return null;
-  const m = /^Bearer (.+)$/i.exec(h);
-  return m ? m[1] : null;
-}
+const enc = new TextEncoder();
+const accessKey = enc.encode(config.jwt.accessSecret);
+const refreshKey = enc.encode(config.jwt.refreshSecret);
 
-// Cookie から値を取り出す
-export function readCookie(req: Request, name: string): string | null {
-  const h = req.headers['cookie'];
-  if (!h) return null;
-  const m = new RegExp(`${name}=([^;]+)`).exec(h);
-  return m ? decodeURIComponent(m[1]) : null;
-}
-
-// ===== token service =====
-
-// access token (短期)
-export async function signAccess(uid: number | string): Promise<string> {
-  return await new SignJWT({ uid })
+/** アクセストークン発行 */
+export async function issueAccessToken(payload: Record<string, unknown>) {
+  const { SignJWT } = await loadJose();
+  return await new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(`${config.jwt.accessTtlSec}s`)
-    .sign(new TextEncoder().encode(config.jwt.accessSecret));
+    .sign(accessKey);
 }
 
-export async function verifyAccess(token: string) {
-  return await jwtVerify(token, new TextEncoder().encode(config.jwt.accessSecret), {
-    algorithms: ['HS256'],
-  });
-}
-
-// refresh token (長期)
-export async function signRefresh(uid: number | string, rot: number): Promise<string> {
-  return await new SignJWT({ uid, rot })
+/** リフレッシュトークン発行 */
+export async function issueRefreshToken(payload: Record<string, unknown>) {
+  const { SignJWT } = await loadJose();
+  return await new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(`${config.jwt.refreshTtlSec}s`)
-    .sign(new TextEncoder().encode(config.jwt.refreshSecret));
+    .sign(refreshKey);
 }
 
-export async function verifyRefresh(token: string) {
-  return await jwtVerify(token, new TextEncoder().encode(config.jwt.refreshSecret), {
-    algorithms: ['HS256'],
-  });
+/** アクセストークン検証（既存コード互換で { payload } を返す） */
+export async function verifyAccess(token: string) {
+  const { jwtVerify } = await loadJose();
+  const result = await jwtVerify(token, accessKey);
+  return { payload: result.payload as Record<string, unknown> };
 }
 
-// ===== helper =====
+/** リフレッシュトークン検証（既存コード互換で { payload } を返す） */
+export async function verifyRefreshToken(token: string) {
+  const { jwtVerify } = await loadJose();
+  const result = await jwtVerify(token, refreshKey);
+  return { payload: result.payload as Record<string, unknown> };
+}
 
-// base64url encode（必要に応じて利用）
-export function base64url(input: string): string {
-  return Buffer.from(input, 'base64')
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '')
-    .split('')
-    .map((s: string) => s.charCodeAt(0).toString(16)) // ★型を追加
-    .join('');
+/** Authorization: Bearer xxx からトークンを取り出す */
+export function readBearer(req: Request): string | null {
+  const h = req.headers.authorization || '';
+  const m = /^Bearer\s+(.+)$/.exec(h);
+  return m ? m[1] : null;
 }

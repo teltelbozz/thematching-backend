@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const tokenService_js_1 = require("../auth/tokenService.js");
+const tokenService_1 = require("../auth/tokenService");
 const router = (0, express_1.Router)();
 function normalizeUid(v) {
     if (typeof v === 'number' && Number.isFinite(v))
@@ -18,10 +18,10 @@ function normalizeUid(v) {
  */
 router.post('/setup', async (req, res) => {
     try {
-        const token = (0, tokenService_js_1.readBearer)(req);
+        const token = (0, tokenService_1.readBearer)(req);
         if (!token)
             return res.status(401).json({ error: 'unauthenticated' });
-        const { payload } = await (0, tokenService_js_1.verifyAccess)(token);
+        const { payload } = await (0, tokenService_1.verifyAccess)(token);
         const uid = normalizeUid(payload.uid);
         if (uid == null)
             return res.status(401).json({ error: 'unauthenticated' });

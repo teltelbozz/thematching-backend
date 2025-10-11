@@ -1,7 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.config = void 0;
-exports.config = {
+exports.CONFIG = exports.config = void 0;
+/**
+ * 全設定値をまとめたオブジェクト
+ */
+const config = {
     env: process.env.NODE_ENV ?? 'development',
     frontOrigin: process.env.FRONT_ORIGIN || 'https://thematching-frontend.vercel.app',
     corsMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -22,8 +25,11 @@ exports.config = {
     debugAuth: process.env.DEBUG_AUTH === '1',
     devAuth: process.env.DEV_FAKE_AUTH === '1',
 };
+exports.config = config;
 function must(v, name) {
     if (!v)
         throw new Error(`Missing env: ${name}`);
     return v;
 }
+exports.default = config; // import config from '../config'
+exports.CONFIG = config; // import { CONFIG } from '../config' も可

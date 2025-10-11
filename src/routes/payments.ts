@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { Pool } from 'pg';
-import { readBearer, verifyAccess } from '../auth/tokenService.js';
+import { readBearer, verifyAccess } from '../auth/tokenService';
 
 const router = Router();
 
