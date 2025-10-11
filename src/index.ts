@@ -3,7 +3,7 @@
 // ESM 実行前提（package.json の "type":"module"）。import の拡張子に .js を付けること。
 
 import { Pool } from 'pg';
-import app from './app.js';
+import app from './app';
 
 // ---- DB 初期化 -------------------------------------------------------------
 
