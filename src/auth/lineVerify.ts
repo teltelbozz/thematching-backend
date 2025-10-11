@@ -1,13 +1,18 @@
-
-import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { config } from '../config/index.js';
 
-const LINE_JWKS = createRemoteJWKSet(new URL('https://api.line.me/oauth2/v2.1/certs'));
+// joseはESM専用なので、動的importで呼び出す
+const loadJose = () => import('jose');
 
 export async function verifyLineIdToken(idToken: string) {
-  return await jwtVerify(idToken, LINE_JWKS, {
+  const { createRemoteJWKSet, jwtVerify } = await loadJose();
+
+  const LINE_JWKS = createRemoteJWKSet(new URL('https://api.line.me/oauth2/v2.1/certs'));
+
+  const { payload } = await jwtVerify(idToken, LINE_JWKS, {
     issuer: config.line.issuer,
     audience: config.line.channelId,
     clockTolerance: 300,
   });
+
+  return payload;
 }

@@ -42,7 +42,7 @@ exports.verifyAccess = verifyAccess;
 exports.verifyRefreshToken = verifyRefreshToken;
 exports.readBearer = readBearer;
 const config_1 = __importDefault(require("../config"));
-// jose は ESM 専用なので動的 import を使う（CJSビルドでもOK）
+// ESM専用の jose を CJS でも使えるように関数内で動的 import
 const loadJose = () => Promise.resolve().then(() => __importStar(require('jose')));
 const enc = new TextEncoder();
 const accessKey = enc.encode(config_1.default.jwt.accessSecret);
@@ -65,19 +65,19 @@ async function issueRefreshToken(payload) {
         .setExpirationTime(`${config_1.default.jwt.refreshTtlSec}s`)
         .sign(refreshKey);
 }
-/** アクセストークン検証（既存コード互換で { payload } を返す） */
+/** アクセストークン検証（既存互換で { payload } 返却） */
 async function verifyAccess(token) {
     const { jwtVerify } = await loadJose();
-    const result = await jwtVerify(token, accessKey);
-    return { payload: result.payload };
+    const res = await jwtVerify(token, accessKey, { algorithms: ['HS256'] });
+    return { payload: res.payload };
 }
-/** リフレッシュトークン検証（既存コード互換で { payload } を返す） */
+/** リフレッシュトークン検証（既存互換で { payload } 返却） */
 async function verifyRefreshToken(token) {
     const { jwtVerify } = await loadJose();
-    const result = await jwtVerify(token, refreshKey);
-    return { payload: result.payload };
+    const res = await jwtVerify(token, refreshKey, { algorithms: ['HS256'] });
+    return { payload: res.payload };
 }
-/** Authorization: Bearer xxx からトークンを取り出す */
+/** Authorization: Bearer xxx 抜き出し */
 function readBearer(req) {
     const h = req.headers.authorization || '';
     const m = /^Bearer\s+(.+)$/.exec(h);

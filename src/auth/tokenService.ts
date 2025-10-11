@@ -1,55 +1,51 @@
-import { SignJWT, jwtVerify } from 'jose';
-import { config } from '../config/index.js';
+// src/auth/tokenService.ts
+import type { Request } from 'express';
+import config from '../config';
 
-const encoder = new TextEncoder();
+// ESM専用の jose を CJS でも使えるように関数内で動的 import
+const loadJose = () => import('jose');
 
-/**
- * アクセストークンを発行
- */
-export async function issueAccessToken(payload: Record<string, any>) {
+const enc = new TextEncoder();
+const accessKey = enc.encode(config.jwt.accessSecret);
+const refreshKey = enc.encode(config.jwt.refreshSecret);
+
+/** アクセストークン発行 */
+export async function issueAccessToken(payload: Record<string, unknown>) {
+  const { SignJWT } = await loadJose();
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
     .setExpirationTime(`${config.jwt.accessTtlSec}s`)
-    .sign(encoder.encode(config.jwt.accessSecret));
+    .sign(accessKey);
 }
 
-/**
- * リフレッシュトークンを発行
- */
-export async function issueRefreshToken(payload: Record<string, any>) {
+/** リフレッシュトークン発行 */
+export async function issueRefreshToken(payload: Record<string, unknown>) {
+  const { SignJWT } = await loadJose();
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
     .setExpirationTime(`${config.jwt.refreshTtlSec}s`)
-    .sign(encoder.encode(config.jwt.refreshSecret));
+    .sign(refreshKey);
 }
 
-/**
- * リフレッシュトークンを検証
- */
-export async function verifyRefreshToken(token: string) {
-  const { payload } = await jwtVerify(
-    token,
-    encoder.encode(config.jwt.refreshSecret)
-  );
-  return payload;
-}
-
-/**
- * アクセストークンを検証
- */
+/** アクセストークン検証（既存互換で { payload } 返却） */
 export async function verifyAccess(token: string) {
-  const { payload } = await jwtVerify(
-    token,
-    encoder.encode(config.jwt.accessSecret)
-  );
-  return payload;
+  const { jwtVerify } = await loadJose();
+  const res = await jwtVerify(token, accessKey, { algorithms: ['HS256'] });
+  return { payload: res.payload as Record<string, unknown> };
 }
 
-/**
- * Authorizationヘッダーから Bearerトークンを抽出
- */
-export function readBearer(header?: string | null): string | null {
-  if (!header) return null;
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  return match ? match[1] : null;
+/** リフレッシュトークン検証（既存互換で { payload } 返却） */
+export async function verifyRefreshToken(token: string) {
+  const { jwtVerify } = await loadJose();
+  const res = await jwtVerify(token, refreshKey, { algorithms: ['HS256'] });
+  return { payload: res.payload as Record<string, unknown> };
+}
+
+/** Authorization: Bearer xxx 抜き出し */
+export function readBearer(req: Request): string | null {
+  const h = req.headers.authorization || '';
+  const m = /^Bearer\s+(.+)$/.exec(h);
+  return m ? m[1] : null;
 }
