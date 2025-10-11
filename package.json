@@ -2,7 +2,6 @@
   "name": "line-miniapp-backend",
   "version": "0.1.2",
   "private": true,
-  "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
