@@ -1,9 +1,8 @@
+// src/middleware/requireAuth.ts
 import type { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
 
-// joseはESM専用なので、関数内で動的importする
-const loadJose = () => import('jose');
-
-const SESSION_SECRET = new TextEncoder().encode(process.env.SESSION_SECRET || 'dev-secret');
+const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-secret';
 const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
 
 function readCookie(req: any, name: string): string | undefined {
@@ -23,11 +22,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const token = tokenFromBearer || readCookie(req, SESSION_COOKIE_NAME);
     if (!token) return res.status(401).json({ error: 'unauthenticated' });
 
-    // 動的importでjwtVerifyを取得
-    const { jwtVerify } = await loadJose();
-    const { payload } = await jwtVerify(token, SESSION_SECRET, { algorithms: ['HS256'] });
-
-    (req as any).userId = (payload as any).uid;
+    const decoded = jwt.verify(token, SESSION_SECRET, { algorithms: ['HS256'] }) as any;
+    (req as any).userId = decoded?.uid;
     return next();
   } catch (e) {
     console.error('[requireAuth]', e);

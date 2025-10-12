@@ -1,46 +1,40 @@
 // src/auth/tokenService.ts
+// jsonwebtoken 版（CJS 互換）— HS256 で access/refresh を発行・検証
 import type { Request } from 'express';
+import jwt from 'jsonwebtoken';
 import config from '../config';
 
-// ESM専用の jose を CJS でも使えるように関数内で動的 import
-const loadJose = () => import('jose');
+const ALG = 'HS256' as const;
 
-const enc = new TextEncoder();
-const accessKey = enc.encode(config.jwt.accessSecret);
-const refreshKey = enc.encode(config.jwt.refreshSecret);
+const accessSecret = config.jwt.accessSecret;
+const refreshSecret = config.jwt.refreshSecret;
 
 /** アクセストークン発行 */
 export async function issueAccessToken(payload: Record<string, unknown>) {
-  const { SignJWT } = await loadJose();
-  return await new SignJWT(payload)
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime(`${config.jwt.accessTtlSec}s`)
-    .sign(accessKey);
+  return jwt.sign(payload, accessSecret, {
+    algorithm: ALG,
+    expiresIn: config.jwt.accessTtlSec, // 秒
+  });
 }
 
 /** リフレッシュトークン発行 */
 export async function issueRefreshToken(payload: Record<string, unknown>) {
-  const { SignJWT } = await loadJose();
-  return await new SignJWT(payload)
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime(`${config.jwt.refreshTtlSec}s`)
-    .sign(refreshKey);
+  return jwt.sign(payload, refreshSecret, {
+    algorithm: ALG,
+    expiresIn: config.jwt.refreshTtlSec, // 秒
+  });
 }
 
-/** アクセストークン検証（既存互換で { payload } 返却） */
+/** アクセストークン検証（既存互換で { payload } を返す） */
 export async function verifyAccess(token: string) {
-  const { jwtVerify } = await loadJose();
-  const res = await jwtVerify(token, accessKey, { algorithms: ['HS256'] });
-  return { payload: res.payload as Record<string, unknown> };
+  const decoded = jwt.verify(token, accessSecret, { algorithms: [ALG] }) as Record<string, unknown>;
+  return { payload: decoded };
 }
 
-/** リフレッシュトークン検証（既存互換で { payload } 返却） */
+/** リフレッシュトークン検証（既存互換で { payload } を返す） */
 export async function verifyRefreshToken(token: string) {
-  const { jwtVerify } = await loadJose();
-  const res = await jwtVerify(token, refreshKey, { algorithms: ['HS256'] });
-  return { payload: res.payload as Record<string, unknown> };
+  const decoded = jwt.verify(token, refreshSecret, { algorithms: [ALG] }) as Record<string, unknown>;
+  return { payload: decoded };
 }
 
 /** Authorization: Bearer xxx 抜き出し */
