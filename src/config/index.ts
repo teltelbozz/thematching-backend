@@ -21,7 +21,7 @@ const config = {
     url: must(process.env.DATABASE_URL, 'DATABASE_URL'),
   },
   debugAuth: process.env.DEBUG_AUTH === '1',
-  devAuth: process.env.DEV_FAKE_AUTH === '1',
+  devAuth: process.env.DEV_FAKE_AUTH === '1' || process.env.DEV_FAKE_AUTH?.toLowerCase() === 'true',
 } as const;
 
 function must<T>(v: T | undefined, name: string): T {
