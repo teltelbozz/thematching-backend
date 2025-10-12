@@ -32,3 +32,5 @@ function must<T>(v: T | undefined, name: string): T {
 export default config;       // import config from '../config'
 export { config };          // import { config } from '../config'
 export const CONFIG = config; // import { CONFIG } from '../config' も可
+
+console.log('[config check] DEV_FAKE_AUTH=', process.env.DEV_FAKE_AUTH);
