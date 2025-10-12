@@ -118,7 +118,10 @@ router.post('/refresh', async (req, res) => {
     const token = req.cookies?.[config.jwt.refreshCookie];
     if (!token) return res.status(401).json({ error: 'no_refresh_token' });
 
-    const payload = verifyRefreshToken(token);
+    // ここが修正点：await を付け、戻り値が { payload } でも動くように正規化
+    const verified = await verifyRefreshToken(token);
+    const payload = normalizeVerifiedResult(verified); // ← login と同じ扱い
+
     const accessToken = issueAccessToken(payload);
     const refreshToken = issueRefreshToken(payload);
 
