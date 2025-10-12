@@ -1,56 +1,45 @@
 // src/auth/lineVerify.ts
-import axios from 'axios';
-import jwt from 'jsonwebtoken';
-import jwkToPem from 'jwk-to-pem';
 import { config } from '../config/index.js';
 
-/**
- * LINEのJWKsから公開鍵を取得してキャッシュします
- */
-let cachedKeys: Record<string, string> = {};
-let lastFetchedAt = 0;
+// jose は ESM 専用のため、CJS/TS からは動的 import で呼び出す
+const joseP = import('jose');
 
-async function getPemForKid(kid: string): Promise<string> {
-  const now = Date.now();
-  // 1時間キャッシュ
-  if (cachedKeys[kid] && now - lastFetchedAt < 3600_000) {
-    return cachedKeys[kid];
-  }
-
-  const res = await axios.get('https://api.line.me/oauth2/v2.1/certs');
-  const jwks = res.data.keys;
-
-  for (const jwk of jwks) {
-    const pem = jwkToPem(jwk);
-    cachedKeys[jwk.kid] = pem;
-  }
-
-  lastFetchedAt = now;
-
-  if (!cachedKeys[kid]) {
-    throw new Error(`No matching key found for kid: ${kid}`);
-  }
-
-  return cachedKeys[kid];
-}
+export type LineIdPayload = {
+  iss: string;
+  sub: string;      // LINE ユーザーID
+  aud: string;      // あなたの Channel ID
+  exp: number;
+  iat: number;
+  name?: string;
+  picture?: string;
+};
 
 /**
- * LINEのIDトークンを検証し、ペイロードを返す
+ * LINEのIDトークンを公式JWKSでRS256検証し、ペイロードを返す
  */
-export async function verifyLineIdToken(idToken: string) {
-  // ヘッダー部分から kid を取得
-  const decodedHeader = jwt.decode(idToken, { complete: true })?.header;
-  if (!decodedHeader || !decodedHeader.kid) {
-    throw new Error('Invalid ID token header');
+export async function verifyLineIdToken(idToken: string): Promise<LineIdPayload> {
+  if (!idToken || typeof idToken !== 'string') {
+    throw new Error('Missing id_token');
   }
 
-  const pem = await getPemForKid(decodedHeader.kid);
+  const { createRemoteJWKSet, jwtVerify } = await joseP;
 
-  const payload = jwt.verify(idToken, pem, {
-    algorithms: ['RS256'],
-    issuer: config.line.issuer,
-    audience: config.line.channelId,
+  // LINE 公式 JWKS（公開鍵）
+  const JWKS = createRemoteJWKSet(new URL('https://api.line.me/oauth2/v2.1/certs'));
+
+  const { payload, protectedHeader } = await jwtVerify(idToken, JWKS, {
+    issuer: config.line.issuer || 'https://access.line.me',
+    audience: config.line.channelId,  // 例: "2008150959"
+    algorithms: ['RS256'],            // RS256 を明示
+    clockTolerance: 300,              // ±5分許容（端末時間ズレ対策）
   });
 
-  return payload;
+  // 念のため alg の健全性チェック（想定外を早期検知）
+  if (protectedHeader?.alg && protectedHeader.alg !== 'RS256') {
+    throw new Error(`Unexpected alg: ${protectedHeader.alg}`);
+  }
+
+  return payload as unknown as LineIdPayload;
 }
+
+export default verifyLineIdToken;
