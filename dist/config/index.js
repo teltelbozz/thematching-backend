@@ -23,7 +23,7 @@ const config = {
         url: must(process.env.DATABASE_URL, 'DATABASE_URL'),
     },
     debugAuth: process.env.DEBUG_AUTH === '1',
-    devAuth: process.env.DEV_FAKE_AUTH === '1',
+    devAuth: process.env.DEV_FAKE_AUTH === '1' || process.env.DEV_FAKE_AUTH?.toLowerCase() === 'true',
 };
 exports.config = config;
 function must(v, name) {
@@ -33,3 +33,4 @@ function must(v, name) {
 }
 exports.default = config; // import config from '../config'
 exports.CONFIG = config; // import { CONFIG } from '../config' も可
+console.log('[config check] DEV_FAKE_AUTH=', process.env.DEV_FAKE_AUTH);

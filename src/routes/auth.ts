@@ -6,8 +6,28 @@ import {
   verifyRefreshToken,
 } from '../auth/tokenService.js';
 import { verifyLineIdToken } from '../auth/lineVerify.js';
+import type { JWTPayload } from 'jose';
 
 const router = express.Router();
+
+type LineJWTPayload = JWTPayload & {
+  sub?: string;
+  name?: string;
+  picture?: string;
+};
+
+function normalizeVerifiedResult(result: unknown): LineJWTPayload {
+  // joseのjwtVerify結果が { payload } か、payloadそのものかの両方を許容
+  const maybe =
+    result && typeof result === 'object' && 'payload' in result
+      ? (result as any).payload
+      : result;
+
+  if (!maybe || typeof maybe === 'string' || typeof maybe !== 'object') {
+    throw new Error('invalid_id_token_payload');
+  }
+  return maybe as LineJWTPayload;
+}
 
 // ==============================
 // POST /auth/login
@@ -23,9 +43,17 @@ router.post('/login', async (req, res) => {
         return res.status(400).json({ error: 'Missing line_user_id' });
       }
 
-      const payload = { uid: String(line_user_id), profile };
-      const accessToken = issueAccessToken(payload);
-      const refreshToken = issueRefreshToken(payload);
+      const uid = String(line_user_id);
+      const claims: Record<string, unknown> = {
+        uid,
+        profile: {
+          displayName: profile?.displayName ?? 'Dev User',
+          picture: profile?.picture,
+        },
+      };
+
+      const accessToken = issueAccessToken(claims);
+      const refreshToken = issueRefreshToken(claims);
 
       res.cookie(config.jwt.refreshCookie, refreshToken, {
         httpOnly: true,
@@ -34,7 +62,7 @@ router.post('/login', async (req, res) => {
         maxAge: config.jwt.refreshTtlSec * 1000,
       });
 
-      console.log('[auth/login] devAuth mode OK:', line_user_id);
+      console.log('[auth/login] devAuth mode OK:', uid);
       return res.json({ accessToken });
     }
 
@@ -46,16 +74,26 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Missing id_token' });
     }
 
-    const payload = await verifyLineIdToken(id_token);
+    // ← ここは必ず await（ビルドエラーの主因だった箇所）
+    const verified = await verifyLineIdToken(id_token);
+    const payload = normalizeVerifiedResult(verified);
 
-    const uid = String(payload.sub);
-    const profile = {
-      displayName: payload.name,
-      picture: payload.picture,
+    const uid = payload.sub ? String(payload.sub) : '';
+    if (!uid) {
+      return res.status(400).json({ error: 'invalid_sub' });
+    }
+
+    const claims: Record<string, unknown> = {
+      uid,
+      profile: {
+        // name/picture はオプショナルのためフォールバックを用意
+        displayName: payload.name ?? 'LINE User',
+        picture: payload.picture,
+      },
     };
 
-    const accessToken = issueAccessToken({ uid, profile });
-    const refreshToken = issueRefreshToken({ uid, profile });
+    const accessToken = issueAccessToken(claims);
+    const refreshToken = issueRefreshToken(claims);
 
     res.cookie(config.jwt.refreshCookie, refreshToken, {
       httpOnly: true,
@@ -101,7 +139,7 @@ router.post('/refresh', async (req, res) => {
 // ==============================
 // POST /auth/logout
 // ==============================
-router.post('/logout', async (req, res) => {
+router.post('/logout', async (_req, res) => {
   try {
     res.clearCookie(config.jwt.refreshCookie);
     return res.json({ ok: true });
