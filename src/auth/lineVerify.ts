@@ -1,36 +1,44 @@
 // src/auth/lineVerify.ts
-// CommonJSビルドでもESM専用ライブラリ jose を安全に扱うバージョン
+// CJS ビルドでも jose(ESM専用)を安全に動的 import する決定版。
+// ポイント：eval('import(...)') を使い、TSが require に変換できない形にする。
 
 export type LineIdPayload = {
   iss: string;
-  sub: string;
-  aud: string;
+  sub: string;      // LINE user id
+  aud: string;      // Channel ID
   exp: number;
   iat: number;
   name?: string;
   picture?: string;
 };
 
-// キャッシュ用（RemoteJWKSetを再利用）
+// RemoteJWKSet のキャッシュ
 let jwks: any | null = null;
 
+// TS のトランスパイルで require に書き換えられないよう eval を使う
+async function loadJose() {
+  // 型付けのため as any
+  return (await (eval('import("jose")') as any)) as typeof import('jose');
+}
+
 export async function verifyLineIdToken(idToken: string): Promise<LineIdPayload> {
-  if (!idToken) throw new Error('Missing id_token');
+  if (!idToken || typeof idToken !== 'string') {
+    throw new Error('Missing id_token');
+  }
 
-  // ✅ joseは動的import（requireを避ける）
-  const { createRemoteJWKSet, jwtVerify } = await import('jose');
+  const { createRemoteJWKSet, jwtVerify } = await loadJose();
 
-  // ✅ 初回だけJWKSを作成
   if (!jwks) {
     jwks = createRemoteJWKSet(new URL('https://api.line.me/oauth2/v2.1/certs'));
   }
 
-  // ✅ envをここで読む（configをトップでimportしない）
+  // 起動時クラッシュを避けるため、env は関数内で参照
   const issuer = process.env.LINE_ISSUER || 'https://access.line.me';
-  const audience = process.env.LINE_CHANNEL_ID;
-  if (!audience) throw new Error('LINE_CHANNEL_ID not set');
+  const audience = process.env.LINE_CHANNEL_ID; // 例) "2008150959"
+  if (!audience) {
+    throw new Error('LINE_CHANNEL_ID not set');
+  }
 
-  // ✅ 検証実行（RS256固定）
   const { payload, protectedHeader } = await jwtVerify(idToken, jwks, {
     algorithms: ['RS256'],
     issuer,
@@ -38,11 +46,11 @@ export async function verifyLineIdToken(idToken: string): Promise<LineIdPayload>
     clockTolerance: 300,
   });
 
-  if (protectedHeader.alg !== 'RS256') {
+  if (protectedHeader?.alg && protectedHeader.alg !== 'RS256') {
     throw new Error(`Unexpected alg: ${protectedHeader.alg}`);
   }
 
-  return payload as LineIdPayload;
+  return payload as unknown as LineIdPayload;
 }
 
 export default verifyLineIdToken;
