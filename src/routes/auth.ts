@@ -17,7 +17,7 @@ type LineJWTPayload = JWTPayload & {
 };
 
 function normalizeVerifiedResult(result: unknown): LineJWTPayload {
-  // joseのjwtVerify結果が { payload } か、payloadそのものかの両方を許容
+  // jose の jwtVerify 結果が { payload } か、payload そのものかの両方を許容
   const maybe =
     result && typeof result === 'object' && 'payload' in result
       ? (result as any).payload
@@ -52,8 +52,9 @@ router.post('/login', async (req, res) => {
         },
       };
 
-      const accessToken = issueAccessToken(claims);
-      const refreshToken = issueRefreshToken(claims);
+      // ← ここを await に
+      const accessToken = await issueAccessToken(claims);
+      const refreshToken = await issueRefreshToken(claims);
 
       res.cookie(config.jwt.refreshCookie, refreshToken, {
         httpOnly: true,
@@ -74,7 +75,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Missing id_token' });
     }
 
-    // ← ここは必ず await（ビルドエラーの主因だった箇所）
+    // 必ず await（ここを忘れるとビルド／実行時に不整合が出ます）
     const verified = await verifyLineIdToken(id_token);
     const payload = normalizeVerifiedResult(verified);
 
@@ -86,14 +87,14 @@ router.post('/login', async (req, res) => {
     const claims: Record<string, unknown> = {
       uid,
       profile: {
-        // name/picture はオプショナルのためフォールバックを用意
-        displayName: payload.name ?? 'LINE User',
+        displayName: payload.name ?? 'LINE User', // name/picture はオプショナル
         picture: payload.picture,
       },
     };
 
-    const accessToken = issueAccessToken(claims);
-    const refreshToken = issueRefreshToken(claims);
+    // ← ここも await に
+    const accessToken = await issueAccessToken(claims);
+    const refreshToken = await issueRefreshToken(claims);
 
     res.cookie(config.jwt.refreshCookie, refreshToken, {
       httpOnly: true,
@@ -118,12 +119,13 @@ router.post('/refresh', async (req, res) => {
     const token = req.cookies?.[config.jwt.refreshCookie];
     if (!token) return res.status(401).json({ error: 'no_refresh_token' });
 
-    // ここが修正点：await を付け、戻り値が { payload } でも動くように正規化
+    // verifyRefreshToken は async 実装想定なので await
     const verified = await verifyRefreshToken(token);
-    const payload = normalizeVerifiedResult(verified); // ← login と同じ扱い
+    const payload = normalizeVerifiedResult(verified);
 
-    const accessToken = issueAccessToken(payload);
-    const refreshToken = issueRefreshToken(payload);
+    // ここも await
+    const accessToken = await issueAccessToken(payload);
+    const refreshToken = await issueRefreshToken(payload);
 
     res.cookie(config.jwt.refreshCookie, refreshToken, {
       httpOnly: true,
