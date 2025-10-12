@@ -40,8 +40,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const index_js_1 = require("../config/index.js");
 const tokenService_js_1 = require("../auth/tokenService.js");
-const diag_js_1 = __importDefault(require("./routes/diag.js"));
-app.use('/api', diag_js_1.default);
 const router = express_1.default.Router();
 function normalizeVerifiedResult(result) {
     // jose の jwtVerify 結果が { payload } か、payload そのものかの両方を許容

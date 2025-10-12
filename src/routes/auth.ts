@@ -7,9 +7,6 @@ import {
   verifyRefreshToken,
 } from '../auth/tokenService.js';
 import type { JWTPayload } from 'jose';
-import diag from './routes/diag.js';
-
-app.use('/api', diag);
 
 const router = express.Router();
 
