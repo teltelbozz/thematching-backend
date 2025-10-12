@@ -1,3 +1,4 @@
+// src/routes/auth.ts
 import express from 'express';
 import { config } from '../config/index.js';
 import {
@@ -5,7 +6,6 @@ import {
   issueRefreshToken,
   verifyRefreshToken,
 } from '../auth/tokenService.js';
-import { verifyLineIdToken } from '../auth/lineVerify.js';
 import type { JWTPayload } from 'jose';
 
 const router = express.Router();
@@ -19,7 +19,7 @@ type LineJWTPayload = JWTPayload & {
 function normalizeVerifiedResult(result: unknown): LineJWTPayload {
   // jose の jwtVerify 結果が { payload } か、payload そのものかの両方を許容
   const maybe =
-    result && typeof result === 'object' && 'payload' in result
+    result && typeof result === 'object' && 'payload' in (result as any)
       ? (result as any).payload
       : result;
 
@@ -35,7 +35,7 @@ function normalizeVerifiedResult(result: unknown): LineJWTPayload {
 router.post('/login', async (req, res) => {
   try {
     // --------------------------------------------------------
-    // ① 開発モード（DEV_FAKE_AUTH=1）の場合：LINE検証をスキップ
+    // ① 開発モード（DEV_FAKE_AUTH=1）：LINE検証スキップ
     // --------------------------------------------------------
     if (config.devAuth) {
       const { line_user_id, profile } = req.body || {};
@@ -52,7 +52,6 @@ router.post('/login', async (req, res) => {
         },
       };
 
-      // ← ここを await に
       const accessToken = await issueAccessToken(claims);
       const refreshToken = await issueRefreshToken(claims);
 
@@ -68,14 +67,16 @@ router.post('/login', async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // ② 本番モード：LINEのIDトークンを検証
+    // ② 本番モード：LINE IDトークンを RS256/JWKS で検証（動的 import）
     // --------------------------------------------------------
     const { id_token } = req.body || {};
     if (!id_token) {
       return res.status(400).json({ error: 'Missing id_token' });
     }
 
-    // 必ず await（ここを忘れるとビルド／実行時に不整合が出ます）
+    // 本番モードで必要になったときだけ読み込む（起動時の落ちを防止）
+    const { verifyLineIdToken } = await import('../auth/lineVerify.js');
+
     const verified = await verifyLineIdToken(id_token);
     const payload = normalizeVerifiedResult(verified);
 
@@ -92,7 +93,6 @@ router.post('/login', async (req, res) => {
       },
     };
 
-    // ← ここも await に
     const accessToken = await issueAccessToken(claims);
     const refreshToken = await issueRefreshToken(claims);
 
@@ -119,11 +119,9 @@ router.post('/refresh', async (req, res) => {
     const token = req.cookies?.[config.jwt.refreshCookie];
     if (!token) return res.status(401).json({ error: 'no_refresh_token' });
 
-    // verifyRefreshToken は async 実装想定なので await
     const verified = await verifyRefreshToken(token);
     const payload = normalizeVerifiedResult(verified);
 
-    // ここも await
     const accessToken = await issueAccessToken(payload);
     const refreshToken = await issueRefreshToken(payload);
 
