@@ -5,7 +5,7 @@ import jwkToPem from 'jwk-to-pem';
 import { config } from '../config/index.js';
 
 /**
- * LINE の JWK を PEM に変換して kid ごとにキャッシュ
+ * LINE の JWK を kid ごとにキャッシュ
  */
 let cachedPems: Record<string, string> = {};
 let lastFetchedAt = 0;
@@ -21,7 +21,7 @@ async function getPemForKid(kid: string): Promise<string> {
   });
 
   if (res.status !== 200 || !res.data?.keys) {
-    throw new Error(`failed_to_fetch_jwks: ${res.status}`);
+    throw new Error(`failed_to_fetch_jwks:${res.status}`);
   }
 
   const keys = res.data.keys as Array<any>;
@@ -47,7 +47,7 @@ async function getPemForKid(kid: string): Promise<string> {
 }
 
 /**
- * LINE の ID トークンを検証してペイロードを返す（RS256 固定）
+ * LINE の ID トークンを検証してペイロードを返す（ES256/RS256 両対応）
  */
 export async function verifyLineIdToken(idToken: string) {
   const decodedHeader = jwt.decode(idToken, { complete: true })?.header as
@@ -58,18 +58,18 @@ export async function verifyLineIdToken(idToken: string) {
     throw new Error('invalid_id_token_header');
   }
 
-  // RS256 以外なら拒否（セキュリティ対策）
-  if (decodedHeader.alg !== 'RS256') {
-    throw new Error(`invalid_algorithm:${decodedHeader.alg}`);
+  // LINEは2024年以降 ES256 が主流（RS256も一部残存）
+  if (decodedHeader.alg !== 'ES256' && decodedHeader.alg !== 'RS256') {
+    throw new Error(`unsupported_algorithm:${decodedHeader.alg}`);
   }
 
   const pem = await getPemForKid(decodedHeader.kid);
 
   const payload = jwt.verify(idToken, pem, {
-    algorithms: ['RS256'],
+    algorithms: ['ES256', 'RS256'],
     issuer: config.line.issuer,
     audience: config.line.channelId,
-    clockTolerance: 300, // 5分の時刻ズレ許容
+    clockTolerance: 300,
   });
 
   return payload;
