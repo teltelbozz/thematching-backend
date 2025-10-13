@@ -5,72 +5,74 @@ import jwkToPem from 'jwk-to-pem';
 import { config } from '../config/index.js';
 
 /**
- * LINE の JWK を kid ごとにキャッシュ
+ * LINEのJWKsから公開鍵を取得してキャッシュします
  */
-let cachedPems: Record<string, string> = {};
+let cachedKeys: Record<string, string> = {};
 let lastFetchedAt = 0;
 
 async function getPemForKid(kid: string): Promise<string> {
   const now = Date.now();
-  if (cachedPems[kid] && now - lastFetchedAt < 3600_000) {
-    return cachedPems[kid];
+  // 1時間キャッシュ
+  if (cachedKeys[kid] && now - lastFetchedAt < 3600_000) {
+    return cachedKeys[kid];
   }
 
-  const res = await axios.get('https://api.line.me/oauth2/v2.1/certs', {
-    timeout: 5000,
-  });
+  const res = await axios.get('https://api.line.me/oauth2/v2.1/certs', { timeout: 5000 });
+  const jwks = res.data?.keys ?? [];
 
-  if (res.status !== 200 || !res.data?.keys) {
-    throw new Error(`failed_to_fetch_jwks:${res.status}`);
+  for (const jwk of jwks) {
+    const pem = jwkToPem(jwk);
+    cachedKeys[jwk.kid] = pem;
   }
-
-  const keys = res.data.keys as Array<any>;
-  const next: Record<string, string> = {};
-
-  for (const jwk of keys) {
-    try {
-      const pem = jwkToPem(jwk);
-      if (jwk.kid) next[jwk.kid] = pem;
-    } catch (e) {
-      console.warn('jwkToPem failed for kid:', jwk.kid, e);
-    }
-  }
-
-  cachedPems = next;
   lastFetchedAt = now;
 
-  if (!cachedPems[kid]) {
-    throw new Error(`no_matching_jwk_for_kid:${kid}`);
+  if (!cachedKeys[kid]) {
+    throw new Error(`No matching key found for kid: ${kid}`);
   }
+  return cachedKeys[kid];
+}
 
-  return cachedPems[kid];
+/** デバッグ用に exp/iat をログ出し（安全のため署名検証前はペイロードを信用しない前提で閲覧のみ） */
+function safeDecode(idToken: string) {
+  try {
+    const decoded = jwt.decode(idToken, { json: true }) as { iat?: number; exp?: number } | null;
+    return decoded || {};
+  } catch {
+    return {};
+  }
 }
 
 /**
- * LINE の ID トークンを検証してペイロードを返す（ES256/RS256 両対応）
+ * LINEのIDトークンを検証し、ペイロードを返す
+ * - 時刻ズレに寛容にするため、clockTimestampを「現在時刻 - 300秒」に設定
+ *   → “最大5分古い”トークンまでは許容（検証環境の安定化目的）
  */
 export async function verifyLineIdToken(idToken: string) {
-  const decodedHeader = jwt.decode(idToken, { complete: true })?.header as
-    | { kid?: string; alg?: string }
-    | undefined;
-
-  if (!decodedHeader?.kid) {
-    throw new Error('invalid_id_token_header');
+  const header = jwt.decode(idToken, { complete: true })?.header as { kid?: string } | undefined;
+  if (!header?.kid) {
+    throw new Error('Invalid ID token header (no kid)');
   }
 
-  // LINEは2024年以降 ES256 が主流（RS256も一部残存）
-  if (decodedHeader.alg !== 'ES256' && decodedHeader.alg !== 'RS256') {
-    throw new Error(`unsupported_algorithm:${decodedHeader.alg}`);
+  // 署名検証前に exp/iat をログ（時刻ズレ解析用）
+  const { iat, exp } = safeDecode(idToken);
+  const now = Math.floor(Date.now() / 1000);
+  console.log('[lineVerify] iat, exp, now =', iat, exp, now, 'skew= -300s');
+
+  const pem = await getPemForKid(header.kid);
+
+  try {
+    // “現在時刻 - 300秒” を検証時計として渡すことで、最大5分の時刻ズレを許容
+    const payload = jwt.verify(idToken, pem, {
+      algorithms: ['RS256', 'ES256'], // 実運用は RS256 で十分 / エラーのES256にも念のため対応
+      issuer: config.line.issuer,
+      audience: config.line.channelId,
+      clockTimestamp: now - 300, // ← スキュー許容（重要）
+    }) as Record<string, unknown>;
+
+    return payload;
+  } catch (e: any) {
+    // 追加ログ（期限切れの詳細など）
+    console.error('[lineVerify] verify failed:', e?.name, e?.message, { iat, exp, now });
+    throw e;
   }
-
-  const pem = await getPemForKid(decodedHeader.kid);
-
-  const payload = jwt.verify(idToken, pem, {
-    algorithms: ['ES256', 'RS256'],
-    issuer: config.line.issuer,
-    audience: config.line.channelId,
-    clockTolerance: 300,
-  });
-
-  return payload;
 }
