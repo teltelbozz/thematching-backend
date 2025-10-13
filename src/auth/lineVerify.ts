@@ -1,56 +1,76 @@
-// src/auth/lineVerify.ts
-// CJS ビルドでも jose(ESM専用)を安全に動的 import する決定版。
-// ポイント：eval('import(...)') を使い、TSが require に変換できない形にする。
+import axios from 'axios';
+import jwt from 'jsonwebtoken';
+import jwkToPem from 'jwk-to-pem';
+import { config } from '../config/index.js';
 
-export type LineIdPayload = {
-  iss: string;
-  sub: string;      // LINE user id
-  aud: string;      // Channel ID
-  exp: number;
-  iat: number;
-  name?: string;
-  picture?: string;
-};
+/**
+ * LINE の JWK を PEM に変換して kid ごとにキャッシュ
+ */
+let cachedPems: Record<string, string> = {};
+let lastFetchedAt = 0;
 
-// RemoteJWKSet のキャッシュ
-let jwks: any | null = null;
-
-// TS のトランスパイルで require に書き換えられないよう eval を使う
-async function loadJose() {
-  // 型付けのため as any
-  return (await (eval('import("jose")') as any)) as typeof import('jose');
-}
-
-export async function verifyLineIdToken(idToken: string): Promise<LineIdPayload> {
-  if (!idToken || typeof idToken !== 'string') {
-    throw new Error('Missing id_token');
+async function getPemForKid(kid: string): Promise<string> {
+  const now = Date.now();
+  // 1時間キャッシュ
+  if (cachedPems[kid] && now - lastFetchedAt < 3600_000) {
+    return cachedPems[kid];
   }
 
-  const { createRemoteJWKSet, jwtVerify } = await loadJose();
-
-  if (!jwks) {
-    jwks = createRemoteJWKSet(new URL('https://api.line.me/oauth2/v2.1/certs'));
-  }
-
-  // 起動時クラッシュを避けるため、env は関数内で参照
-  const issuer = process.env.LINE_ISSUER || 'https://access.line.me';
-  const audience = process.env.LINE_CHANNEL_ID; // 例) "2008150959"
-  if (!audience) {
-    throw new Error('LINE_CHANNEL_ID not set');
-  }
-
-  const { payload, protectedHeader } = await jwtVerify(idToken, jwks, {
-    algorithms: ['RS256'],
-    issuer,
-    audience,
-    clockTolerance: 300,
+  const res = await axios.get('https://api.line.me/oauth2/v2.1/certs', {
+    timeout: 5000,
+    validateStatus: () => true,
   });
 
-  if (protectedHeader?.alg && protectedHeader.alg !== 'RS256') {
-    throw new Error(`Unexpected alg: ${protectedHeader.alg}`);
+  if (res.status !== 200 || !res.data?.keys) {
+    throw new Error(`failed_to_fetch_jwks: status=${res.status}`);
   }
 
-  return payload as unknown as LineIdPayload;
+  const keys = res.data.keys as Array<any>;
+  const next: Record<string, string> = {};
+  for (const jwk of keys) {
+    try {
+      const pem = jwkToPem(jwk);
+      if (jwk.kid) next[jwk.kid] = pem;
+    } catch {
+      // 変換できない key はスキップ
+    }
+  }
+
+  cachedPems = next;
+  lastFetchedAt = now;
+
+  if (!cachedPems[kid]) {
+    throw new Error(`no_matching_jwk_for_kid:${kid}`);
+  }
+  return cachedPems[kid];
 }
 
-export default verifyLineIdToken;
+/**
+ * LINE の ID トークンを検証してペイロードを返す（CJS 互換）
+ * - 署名: RS256
+ * - iss/aud もチェック
+ */
+export async function verifyLineIdToken(idToken: string) {
+  // kid をヘッダから取得
+  const decodedHeader = jwt.decode(idToken, { complete: true })?.header as
+    | { kid?: string; alg?: string }
+    | undefined;
+
+  if (!decodedHeader?.kid) {
+    throw new Error('invalid_id_token_header');
+  }
+
+  // LINE の公開鍵（該当 kid）を取得
+  const pem = await getPemForKid(decodedHeader.kid);
+
+  // 署名・クレーム検証（RS256 固定）
+  const payload = jwt.verify(idToken, pem, {
+    algorithms: ['RS256'],
+    issuer: config.line.issuer,      // https://access.line.me
+    audience: config.line.channelId, // LINE Channel ID
+    clockTolerance: 300,             // 多少の時刻ズレを許容（秒）
+  });
+
+  // 返り値はそのまま payload（object）を返す
+  return payload;
+}

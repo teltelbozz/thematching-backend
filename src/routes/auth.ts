@@ -6,18 +6,20 @@ import {
   issueRefreshToken,
   verifyRefreshToken,
 } from '../auth/tokenService.js';
-import type { JWTPayload } from 'jose';
 
-const router = express.Router();
-
-type LineJWTPayload = JWTPayload & {
+// jose への依存をなくすため、必要な型は自前定義に置き換え
+type JWTPayloadLike = Record<string, unknown> & {
   sub?: string;
   name?: string;
   picture?: string;
 };
 
+type LineJWTPayload = JWTPayloadLike;
+
+const router = express.Router();
+
 function normalizeVerifiedResult(result: unknown): LineJWTPayload {
-  // jose の jwtVerify 結果が { payload } か、payload そのものかの両方を許容
+  // jwtVerify の戻りが { payload } でも payload そのものでも両対応
   const maybe =
     result && typeof result === 'object' && 'payload' in (result as any)
       ? (result as any).payload
@@ -74,7 +76,7 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Missing id_token' });
     }
 
-    // 本番モードで必要になったときだけ読み込む（起動時の落ちを防止）
+    // 必要になったときだけ読み込み（CJS 環境で j ose を避けるため、検証ロジックは lineVerify.ts で CJS 互換に実装）
     const { verifyLineIdToken } = await import('../auth/lineVerify.js');
 
     const verified = await verifyLineIdToken(id_token);
