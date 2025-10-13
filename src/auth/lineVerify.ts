@@ -1,3 +1,4 @@
+// src/auth/lineVerify.ts
 import axios from 'axios';
 import jwt from 'jsonwebtoken';
 import jwkToPem from 'jwk-to-pem';
@@ -11,28 +12,27 @@ let lastFetchedAt = 0;
 
 async function getPemForKid(kid: string): Promise<string> {
   const now = Date.now();
-  // 1時間キャッシュ
   if (cachedPems[kid] && now - lastFetchedAt < 3600_000) {
     return cachedPems[kid];
   }
 
   const res = await axios.get('https://api.line.me/oauth2/v2.1/certs', {
     timeout: 5000,
-    validateStatus: () => true,
   });
 
   if (res.status !== 200 || !res.data?.keys) {
-    throw new Error(`failed_to_fetch_jwks: status=${res.status}`);
+    throw new Error(`failed_to_fetch_jwks: ${res.status}`);
   }
 
   const keys = res.data.keys as Array<any>;
   const next: Record<string, string> = {};
+
   for (const jwk of keys) {
     try {
       const pem = jwkToPem(jwk);
       if (jwk.kid) next[jwk.kid] = pem;
-    } catch {
-      // 変換できない key はスキップ
+    } catch (e) {
+      console.warn('jwkToPem failed for kid:', jwk.kid, e);
     }
   }
 
@@ -42,16 +42,14 @@ async function getPemForKid(kid: string): Promise<string> {
   if (!cachedPems[kid]) {
     throw new Error(`no_matching_jwk_for_kid:${kid}`);
   }
+
   return cachedPems[kid];
 }
 
 /**
- * LINE の ID トークンを検証してペイロードを返す（CJS 互換）
- * - 署名: RS256
- * - iss/aud もチェック
+ * LINE の ID トークンを検証してペイロードを返す（RS256 固定）
  */
 export async function verifyLineIdToken(idToken: string) {
-  // kid をヘッダから取得
   const decodedHeader = jwt.decode(idToken, { complete: true })?.header as
     | { kid?: string; alg?: string }
     | undefined;
@@ -60,17 +58,19 @@ export async function verifyLineIdToken(idToken: string) {
     throw new Error('invalid_id_token_header');
   }
 
-  // LINE の公開鍵（該当 kid）を取得
+  // RS256 以外なら拒否（セキュリティ対策）
+  if (decodedHeader.alg !== 'RS256') {
+    throw new Error(`invalid_algorithm:${decodedHeader.alg}`);
+  }
+
   const pem = await getPemForKid(decodedHeader.kid);
 
-  // 署名・クレーム検証（RS256 固定）
   const payload = jwt.verify(idToken, pem, {
     algorithms: ['RS256'],
-    issuer: config.line.issuer,      // https://access.line.me
-    audience: config.line.channelId, // LINE Channel ID
-    clockTolerance: 300,             // 多少の時刻ズレを許容（秒）
+    issuer: config.line.issuer,
+    audience: config.line.channelId,
+    clockTolerance: 300, // 5分の時刻ズレ許容
   });
 
-  // 返り値はそのまま payload（object）を返す
   return payload;
 }
