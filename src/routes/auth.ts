@@ -59,8 +59,9 @@ router.post('/login', async (req, res) => {
 
       res.cookie(config.jwt.refreshCookie, refreshToken, {
         httpOnly: true,
-        secure: config.env === 'production',
-        sameSite: 'lax',
+        secure: true,           // HTTPS環境では必須
+        sameSite: 'none',       // ← ← ← ここが最重要！
+        path: '/',              // 明示推奨
         maxAge: config.jwt.refreshTtlSec * 1000,
       });
 
