@@ -7,7 +7,6 @@ import {
   verifyRefreshToken,
 } from '../auth/tokenService.js';
 
-// jose への依存をなくすため、必要な型は自前定義に置き換え
 type JWTPayloadLike = Record<string, unknown> & {
   sub?: string;
   name?: string;
@@ -19,7 +18,6 @@ type LineJWTPayload = JWTPayloadLike;
 const router = express.Router();
 
 function normalizeVerifiedResult(result: unknown): LineJWTPayload {
-  // jwtVerify の戻りが { payload } でも payload そのものでも両対応
   const maybe =
     result && typeof result === 'object' && 'payload' in (result as any)
       ? (result as any).payload
@@ -59,9 +57,9 @@ router.post('/login', async (req, res) => {
 
       res.cookie(config.jwt.refreshCookie, refreshToken, {
         httpOnly: true,
-        secure: true,           // HTTPS環境では必須
-        sameSite: 'none',       // ← ← ← ここが最重要！
-        path: '/',              // 明示推奨
+        secure: true,       // ← 常に true（Vercel は https）
+        sameSite: 'none',   // ← クロスドメイン許可
+        path: '/',          // ← 明示
         maxAge: config.jwt.refreshTtlSec * 1000,
       });
 
@@ -70,16 +68,14 @@ router.post('/login', async (req, res) => {
     }
 
     // --------------------------------------------------------
-    // ② 本番モード：LINE IDトークンを RS256/JWKS で検証（動的 import）
+    // ② 本番モード：LINE IDトークン検証
     // --------------------------------------------------------
     const { id_token } = req.body || {};
     if (!id_token) {
       return res.status(400).json({ error: 'Missing id_token' });
     }
 
-    // 必要になったときだけ読み込み（CJS 環境で j ose を避けるため、検証ロジックは lineVerify.ts で CJS 互換に実装）
     const { verifyLineIdToken } = await import('../auth/lineVerify.js');
-
     const verified = await verifyLineIdToken(id_token);
     const payload = normalizeVerifiedResult(verified);
 
@@ -91,7 +87,7 @@ router.post('/login', async (req, res) => {
     const claims: Record<string, unknown> = {
       uid,
       profile: {
-        displayName: payload.name ?? 'LINE User', // name/picture はオプショナル
+        displayName: payload.name ?? 'LINE User',
         picture: payload.picture,
       },
     };
@@ -101,8 +97,9 @@ router.post('/login', async (req, res) => {
 
     res.cookie(config.jwt.refreshCookie, refreshToken, {
       httpOnly: true,
-      secure: config.env === 'production',
-      sameSite: 'lax',
+      secure: true,       // ← production でも常に true
+      sameSite: 'none',   // ← Lax → None に変更
+      path: '/',          // ← 明示
       maxAge: config.jwt.refreshTtlSec * 1000,
     });
 
@@ -130,8 +127,9 @@ router.post('/refresh', async (req, res) => {
 
     res.cookie(config.jwt.refreshCookie, refreshToken, {
       httpOnly: true,
-      secure: config.env === 'production',
-      sameSite: 'lax',
+      secure: true,       // ← 常に true
+      sameSite: 'none',   // ← クロスサイト対応
+      path: '/',          // ← 明示
       maxAge: config.jwt.refreshTtlSec * 1000,
     });
 
@@ -147,7 +145,11 @@ router.post('/refresh', async (req, res) => {
 // ==============================
 router.post('/logout', async (_req, res) => {
   try {
-    res.clearCookie(config.jwt.refreshCookie);
+    res.clearCookie(config.jwt.refreshCookie, {
+      path: '/',
+      sameSite: 'none',
+      secure: true,
+    });
     return res.json({ ok: true });
   } catch (err) {
     console.error('[auth/logout]', err);
