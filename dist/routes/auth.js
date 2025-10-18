@@ -38,11 +38,20 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 // src/routes/auth.ts
 const express_1 = __importDefault(require("express"));
-const index_js_1 = require("../config/index.js");
-const tokenService_js_1 = require("../auth/tokenService.js");
+const config_1 = __importDefault(require("../config"));
+const tokenService_1 = require("../auth/tokenService");
 const router = express_1.default.Router();
+// Cookie オプションを一元化
+const COOKIE_OPTS = {
+    httpOnly: true,
+    secure: true, // SameSite=None の場合は true 必須
+    sameSite: 'none',
+    path: config_1.default.cookie.path || '/',
+    // domain は必要なときのみ（誤設定は破棄の原因）
+    ...(config_1.default.cookie.domain ? { domain: config_1.default.cookie.domain } : {}),
+    maxAge: config_1.default.jwt.refreshTtlSec * 1000,
+};
 function normalizeVerifiedResult(result) {
-    // jwtVerify の戻りが { payload } でも payload そのものでも両対応
     const maybe = result && typeof result === 'object' && 'payload' in result
         ? result.payload
         : result;
@@ -51,16 +60,12 @@ function normalizeVerifiedResult(result) {
     }
     return maybe;
 }
-// ==============================
 // POST /auth/login
-// ==============================
 router.post('/login', async (req, res) => {
     try {
-        // --------------------------------------------------------
-        // ① 開発モード（DEV_FAKE_AUTH=1）：LINE検証スキップ
-        // --------------------------------------------------------
-        if (index_js_1.config.devAuth) {
-            const { line_user_id, profile } = req.body || {};
+        // dev: フェイクログイン（id_token 不要）
+        if (config_1.default.devAuth) {
+            const { line_user_id, profile } = (req.body || {});
             if (!line_user_id) {
                 return res.status(400).json({ error: 'Missing line_user_id' });
             }
@@ -72,86 +77,65 @@ router.post('/login', async (req, res) => {
                     picture: profile?.picture,
                 },
             };
-            const accessToken = await (0, tokenService_js_1.issueAccessToken)(claims);
-            const refreshToken = await (0, tokenService_js_1.issueRefreshToken)(claims);
-            res.cookie(index_js_1.config.jwt.refreshCookie, refreshToken, {
-                httpOnly: true,
-                secure: index_js_1.config.env === 'production',
-                sameSite: 'lax',
-                maxAge: index_js_1.config.jwt.refreshTtlSec * 1000,
-            });
-            console.log('[auth/login] devAuth mode OK:', uid);
-            return res.json({ accessToken });
+            const accessToken = await (0, tokenService_1.issueAccessToken)(claims);
+            const refreshToken = await (0, tokenService_1.issueRefreshToken)(claims);
+            res.cookie(config_1.default.jwt.refreshCookie, refreshToken, COOKIE_OPTS);
+            return res.json({ access_token: accessToken, accessToken }); // 両表記対応
         }
-        // --------------------------------------------------------
-        // ② 本番モード：LINE IDトークンを RS256/JWKS で検証（動的 import）
-        // --------------------------------------------------------
+        // prod: LINE IDトークン検証（RS256/JWKS）
         const { id_token } = req.body || {};
         if (!id_token) {
             return res.status(400).json({ error: 'Missing id_token' });
         }
-        // 必要になったときだけ読み込み（CJS 環境で j ose を避けるため、検証ロジックは lineVerify.ts で CJS 互換に実装）
-        const { verifyLineIdToken } = await Promise.resolve().then(() => __importStar(require('../auth/lineVerify.js')));
+        const { verifyLineIdToken } = await Promise.resolve().then(() => __importStar(require('../auth/lineVerify'))); // 動的 import
         const verified = await verifyLineIdToken(id_token);
         const payload = normalizeVerifiedResult(verified);
         const uid = payload.sub ? String(payload.sub) : '';
-        if (!uid) {
+        if (!uid)
             return res.status(400).json({ error: 'invalid_sub' });
-        }
         const claims = {
             uid,
             profile: {
-                displayName: payload.name ?? 'LINE User', // name/picture はオプショナル
+                displayName: payload.name ?? 'LINE User',
                 picture: payload.picture,
             },
         };
-        const accessToken = await (0, tokenService_js_1.issueAccessToken)(claims);
-        const refreshToken = await (0, tokenService_js_1.issueRefreshToken)(claims);
-        res.cookie(index_js_1.config.jwt.refreshCookie, refreshToken, {
-            httpOnly: true,
-            secure: index_js_1.config.env === 'production',
-            sameSite: 'lax',
-            maxAge: index_js_1.config.jwt.refreshTtlSec * 1000,
-        });
-        console.log('[auth/login] LINE verified:', uid);
-        return res.json({ accessToken });
+        const accessToken = await (0, tokenService_1.issueAccessToken)(claims);
+        const refreshToken = await (0, tokenService_1.issueRefreshToken)(claims);
+        res.cookie(config_1.default.jwt.refreshCookie, refreshToken, COOKIE_OPTS);
+        return res.json({ access_token: accessToken, accessToken });
     }
     catch (err) {
         console.error('[auth/login]', err);
         return res.status(500).json({ error: 'login_failed' });
     }
 });
-// ==============================
 // POST /auth/refresh
-// ==============================
 router.post('/refresh', async (req, res) => {
     try {
-        const token = req.cookies?.[index_js_1.config.jwt.refreshCookie];
+        const token = req.cookies?.[config_1.default.jwt.refreshCookie];
         if (!token)
             return res.status(401).json({ error: 'no_refresh_token' });
-        const verified = await (0, tokenService_js_1.verifyRefreshToken)(token);
+        const verified = await (0, tokenService_1.verifyRefreshToken)(token);
         const payload = normalizeVerifiedResult(verified);
-        const accessToken = await (0, tokenService_js_1.issueAccessToken)(payload);
-        const refreshToken = await (0, tokenService_js_1.issueRefreshToken)(payload);
-        res.cookie(index_js_1.config.jwt.refreshCookie, refreshToken, {
-            httpOnly: true,
-            secure: index_js_1.config.env === 'production',
-            sameSite: 'lax',
-            maxAge: index_js_1.config.jwt.refreshTtlSec * 1000,
-        });
-        return res.json({ accessToken });
+        const accessToken = await (0, tokenService_1.issueAccessToken)(payload);
+        const refreshToken = await (0, tokenService_1.issueRefreshToken)(payload);
+        res.cookie(config_1.default.jwt.refreshCookie, refreshToken, COOKIE_OPTS);
+        return res.json({ access_token: accessToken, accessToken });
     }
     catch (err) {
         console.error('[auth/refresh]', err);
         return res.status(401).json({ error: 'refresh_failed' });
     }
 });
-// ==============================
 // POST /auth/logout
-// ==============================
 router.post('/logout', async (_req, res) => {
     try {
-        res.clearCookie(index_js_1.config.jwt.refreshCookie);
+        // 消すときも同一オプションで（path/samesite/secure/domain が一致しないと消えない）
+        res.clearCookie(config_1.default.jwt.refreshCookie, {
+            ...COOKIE_OPTS,
+            maxAge: undefined,
+        });
         return res.json({ ok: true });
     }
     catch (err) {
