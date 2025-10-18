@@ -1,0 +1,44 @@
+name: CI
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      # Backend
+      - name: Install backend deps
+        working-directory: backend
+        run: npm ci
+
+      - name: Typecheck backend
+        working-directory: backend
+        run: npm run build --silent
+
+      # Frontend
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck & build frontend
+        working-directory: frontend
+        run: npm run build --silent
+
+      # ルート表検査（失敗しない情報収集の例：将来は失敗条件化してもOK）
+      - name: List route mount points (static check)
+        run: |
+          echo "Expect: /api/auth, /api/profile mounted in backend/src/app.ts"
+          grep -n "app.use('/api/auth'" backend/src/app.ts
+          grep -n "app.use('/api/profile'" backend/src/app.ts
