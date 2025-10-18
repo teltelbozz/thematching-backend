@@ -35,8 +35,8 @@ app.get('/api/health', (_req, res) => {
 });
 
 // ルータのマウント
-app.use('/api', authRoutes);     // auth は /api/auth/...
-app.use('/api', profileRoutes);  // profile は /api/profile になる（※ profile側の定義に依存）
+app.use('/api/auth', authRoutes);
+app.use('/api/profile', profileRoutes);  //router.get('/', ...) なので、この記載。 /api/profile にマウントされる
 
 // ------- 診断用: 登録ルートを一覧表示 -------
 app.get('/api/diag/routes', (_req, res) => {
