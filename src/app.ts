@@ -4,12 +4,14 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import morgan from 'morgan';
 import config from './config';
+
+// ★ 追加：各ルータ
 import authRoutes from './routes/auth';
-import profileRoutes from './routes/profile'; // ★ これを追加
+import profileRoutes from './routes/profile'; // ← これを必ず import
 
 const app = express();
 
-// 重要：Vercel/プロキシ越しでも Secure Cookie を有効にするため
+// Vercel/プロキシ越しでも Secure Cookie を有効化
 app.set('trust proxy', 1);
 
 // ログ／JSON／Cookie
@@ -17,10 +19,10 @@ app.use(morgan('combined'));
 app.use(express.json());
 app.use(cookieParser());
 
-// CORS 設定：オリジン固定＋Cookie許可（※ワイルドカード不可）
+// CORS（オリジン固定＋Cookie許可）
 app.use(
   cors({
-    origin: config.frontOrigin,              // 例: https://thematching-frontend.vercel.app
+    origin: config.frontOrigin,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -32,10 +34,42 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, env: config.env });
 });
 
-// 認証ルート
-app.use('/api/auth', authRoutes);
+// ルータのマウント
+app.use('/api', authRoutes);     // auth は /api/auth/...
+app.use('/api', profileRoutes);  // profile は /api/profile になる（※ profile側の定義に依存）
 
-// ★ プロフィール系ルート（router.get('/profile', ...) を /api にマウント）
-app.use('/api', profileRoutes);
+// ------- 診断用: 登録ルートを一覧表示 -------
+app.get('/api/diag/routes', (_req, res) => {
+  const routes: Array<{ method: string; path: string }> = [];
+  const stack = (app as any)?._router?.stack ?? [];
+  for (const layer of stack) {
+    if (layer.route && layer.route.path) {
+      const methods = Object.keys(layer.route.methods)
+        .filter((m) => layer.route.methods[m])
+        .map((m) => m.toUpperCase());
+      for (const m of methods) {
+        routes.push({ method: m, path: layer.route.path });
+      }
+    } else if (layer.name === 'router' && layer.handle?.stack) {
+      for (const lr of layer.handle.stack) {
+        if (lr.route?.path) {
+          const methods = Object.keys(lr.route.methods)
+            .filter((m) => lr.route.methods[m])
+            .map((m) => m.toUpperCase());
+          for (const m of methods) {
+            // ベースパス（layer.regexp）をざっくり復元
+            const base =
+              (layer?.regexp?.fast_star && '*') ||
+              (layer?.regexp?.fast_slash && '/') ||
+              (layer?.regexp?.source?.includes('\\/api') ? '/api' : '');
+            routes.push({ method: m, path: `${base}${lr.route.path}` });
+          }
+        }
+      }
+    }
+  }
+  res.json({ routes });
+});
+// --------------------------------------------
 
 export default app;
