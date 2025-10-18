@@ -60,6 +60,18 @@ function normalizeVerifiedResult(result) {
     }
     return maybe;
 }
+function buildClaimsFromPayload(payload) {
+    // JWT の標準クレーム（exp, iat, nbf, iss, aud など）はコピーしない
+    // アプリで使うものだけをホワイトリストで取り出す
+    const uid = payload?.uid ?? payload?.sub ?? null;
+    const profile = payload?.profile ?? undefined;
+    const claims = {};
+    if (uid != null)
+        claims.uid = uid;
+    if (profile != null)
+        claims.profile = profile;
+    return claims;
+}
 // POST /auth/login
 router.post('/login', async (req, res) => {
     try {
@@ -110,7 +122,9 @@ router.post('/login', async (req, res) => {
         return res.status(500).json({ error: 'login_failed' });
     }
 });
+// ==============================
 // POST /auth/refresh
+// ==============================
 router.post('/refresh', async (req, res) => {
     try {
         const token = req.cookies?.[config_1.default.jwt.refreshCookie];
@@ -118,10 +132,18 @@ router.post('/refresh', async (req, res) => {
             return res.status(401).json({ error: 'no_refresh_token' });
         const verified = await (0, tokenService_1.verifyRefreshToken)(token);
         const payload = normalizeVerifiedResult(verified);
-        const accessToken = await (0, tokenService_1.issueAccessToken)(payload);
-        const refreshToken = await (0, tokenService_1.issueRefreshToken)(payload);
-        res.cookie(config_1.default.jwt.refreshCookie, refreshToken, COOKIE_OPTS);
-        return res.json({ access_token: accessToken, accessToken });
+        // ★ ここが重要：exp/iat 等を含む元 payload は使わず、アプリ用クレームだけで再発行
+        const claims = buildClaimsFromPayload(payload);
+        const accessToken = await (0, tokenService_1.issueAccessToken)(claims);
+        const refreshToken = await (0, tokenService_1.issueRefreshToken)(claims);
+        res.cookie(config_1.default.jwt.refreshCookie, refreshToken, {
+            httpOnly: true,
+            secure: true, // ← 全経路で統一
+            sameSite: 'none', // ← 全経路で統一（クロスオリジン前提）
+            path: '/', // ← 明示
+            maxAge: config_1.default.jwt.refreshTtlSec * 1000,
+        });
+        return res.json({ accessToken });
     }
     catch (err) {
         console.error('[auth/refresh]', err);

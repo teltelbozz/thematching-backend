@@ -39,6 +39,18 @@ function normalizeVerifiedResult(result: unknown): LineJWTPayload {
   return maybe as LineJWTPayload;
 }
 
+function buildClaimsFromPayload(payload: any): Record<string, unknown> {
+  // JWT の標準クレーム（exp, iat, nbf, iss, aud など）はコピーしない
+  // アプリで使うものだけをホワイトリストで取り出す
+  const uid = payload?.uid ?? payload?.sub ?? null;
+  const profile = payload?.profile ?? undefined;
+  const claims: Record<string, unknown> = {};
+  if (uid != null) claims.uid = uid;
+  if (profile != null) claims.profile = profile;
+  return claims;
+}
+
+
 // POST /auth/login
 router.post('/login', async (req, res) => {
   try {
@@ -98,7 +110,9 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// ==============================
 // POST /auth/refresh
+// ==============================
 router.post('/refresh', async (req, res) => {
   try {
     const token = req.cookies?.[config.jwt.refreshCookie];
@@ -107,11 +121,21 @@ router.post('/refresh', async (req, res) => {
     const verified = await verifyRefreshToken(token);
     const payload = normalizeVerifiedResult(verified);
 
-    const accessToken = await issueAccessToken(payload);
-    const refreshToken = await issueRefreshToken(payload);
+    // ★ ここが重要：exp/iat 等を含む元 payload は使わず、アプリ用クレームだけで再発行
+    const claims = buildClaimsFromPayload(payload);
 
-    res.cookie(config.jwt.refreshCookie, refreshToken, COOKIE_OPTS);
-    return res.json({ access_token: accessToken, accessToken });
+    const accessToken = await issueAccessToken(claims);
+    const refreshToken = await issueRefreshToken(claims);
+
+    res.cookie(config.jwt.refreshCookie, refreshToken, {
+      httpOnly: true,
+      secure: true,            // ← 全経路で統一
+      sameSite: 'none',        // ← 全経路で統一（クロスオリジン前提）
+      path: '/',               // ← 明示
+      maxAge: config.jwt.refreshTtlSec * 1000,
+    });
+
+    return res.json({ accessToken });
   } catch (err) {
     console.error('[auth/refresh]', err);
     return res.status(401).json({ error: 'refresh_failed' });
