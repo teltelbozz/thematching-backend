@@ -5,6 +5,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 import config from './config';
 import authRoutes from './routes/auth';
+import profileRoutes from './routes/profile'; // ★ これを追加
 
 const app = express();
 
@@ -19,7 +20,7 @@ app.use(cookieParser());
 // CORS 設定：オリジン固定＋Cookie許可（※ワイルドカード不可）
 app.use(
   cors({
-    origin: config.frontOrigin,
+    origin: config.frontOrigin,              // 例: https://thematching-frontend.vercel.app
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -33,5 +34,8 @@ app.get('/api/health', (_req, res) => {
 
 // 認証ルート
 app.use('/api/auth', authRoutes);
+
+// ★ プロフィール系ルート（router.get('/profile', ...) を /api にマウント）
+app.use('/api', profileRoutes);
 
 export default app;
