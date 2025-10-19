@@ -1,44 +1,81 @@
 // src/auth/lineVerify.ts
-import axios from 'axios';
-import jwt from 'jsonwebtoken';
-import jwkToPem from 'jwk-to-pem';
-import config from '../config';
+import jwt from "jsonwebtoken";
+import { createPublicKey } from "crypto";
 
-let pemCache: Record<string, string> = {};
-let lastFetch = 0;
+const LINE_JWKS_URL = "https://api.line.me/oauth2/v2.1/certs";
+/**
+ * audience には「LINEチャネルID」を使います（LIFF IDではありません）
+ * 例: process.env.LINE_CHANNEL_ID に設定
+ */
+const LINE_CHANNEL_ID = process.env.LINE_CHANNEL_ID;
 
-async function getPem(kid: string): Promise<string> {
-  const now = Date.now();
-  if (pemCache[kid] && now - lastFetch < 3600_000) return pemCache[kid];
-
-  const { data } = await axios.get('https://api.line.me/oauth2/v2.1/certs');
-  for (const jwk of data.keys) {
-    pemCache[jwk.kid] = jwkToPem(jwk);
-  }
-  lastFetch = now;
-
-  const pem = pemCache[kid];
-  if (!pem) throw new Error(`no_jwk_for_kid:${kid}`);
-  return pem;
+/**
+ * JWK(JSON Web Key) を Node.js KeyObject → PEM に変換
+ * Node v16+ は JWK から直接 PublicKey を作れます。
+ */
+function jwkToPem(jwk: any): string {
+  const keyObject = createPublicKey({ key: jwk, format: "jwk" as any });
+  return keyObject.export({ format: "pem", type: "spki" }).toString();
 }
 
+/** JWKS を取得して kid に一致する鍵を返す */
+async function fetchKeyByKid(kid: string) {
+  const res = await fetch(LINE_JWKS_URL, { cache: "no-store" });
+  if (!res.ok) throw new Error(`fetch_jwks_failed:${res.status}`);
+  const jwks = (await res.json()) as { keys: any[] };
+  if (!jwks?.keys?.length) throw new Error("no_jwks_keys");
+
+  const jwk = jwks.keys.find((k) => k.kid === kid);
+  if (!jwk) throw new Error(`no_matching_kid:${kid}`);
+
+  // x5c があれば証明書からPEMを組む。なければJWK→PEM変換。
+  if (Array.isArray(jwk.x5c) && jwk.x5c[0]) {
+    const cert = `-----BEGIN CERTIFICATE-----\n${jwk.x5c[0]}\n-----END CERTIFICATE-----`;
+    return { jwk, pem: cert };
+  }
+  return { jwk, pem: jwkToPem(jwk) };
+}
+
+/**
+ * LINE の ID トークンを検証して payload を返す
+ * - RS256 / ES256 の両対応
+ * - iss / aud / exp を検証
+ */
 export async function verifyLineIdToken(idToken: string) {
-  // kid を読む
-  const decodedHeader = jwt.decode(idToken, { complete: true })?.header as { kid?: string } | undefined;
-  if (!decodedHeader?.kid) throw new Error('invalid_id_token_header');
+  if (!LINE_CHANNEL_ID) throw new Error("missing_env:LINE_CHANNEL_ID");
 
-  const pem = await getPem(decodedHeader.kid);
+  // kid / alg 取得のために decode（検証なし）
+  const decoded = jwt.decode(idToken, { complete: true }) as
+    | { header: { kid?: string; alg?: string }; payload: any }
+    | null;
+  if (!decoded?.header?.kid) throw new Error("id_token_missing_kid");
+  const { kid, alg } = decoded.header;
 
-  // 署名と aud/iss を検証
-  const payload = jwt.verify(idToken, pem, {
-    algorithms: ['RS256'],
-    issuer: 'https://access.line.me',
-    audience: config.line.channelId, // 例: "2008150959"
-  }) as Record<string, unknown>;
+  // LINE から ES256 が来ることもあるので両方許可
+  const allowedAlgs = ["RS256", "ES256"];
+  if (!alg || !allowedAlgs.includes(alg)) {
+    throw new Error(`invalid_algorithm:${alg}`);
+  }
 
-  // デバッグ（今回のような食い違い検出用）
-  console.log('[lineVerify] decoded payload =', payload);
+  // kid に対応する公開鍵を取得
+  const { pem } = await fetchKeyByKid(kid);
 
-  // ★重要：{ payload: ... } ではなく、payload そのものを返す
-  return payload; 
+  // 仕様値
+  const verifyOptions: jwt.VerifyOptions = {
+    algorithms: allowedAlgs as jwt.Algorithm[],
+    audience: LINE_CHANNEL_ID,
+    issuer: "https://access.line.me",
+  };
+
+  // 検証
+  const payload = jwt.verify(idToken, pem, verifyOptions);
+
+  console.log('[lineVerify] decoded payload =', payload);// for debug
+
+  // jsonwebtoken は payload を object/string のどちらかで返すので object を期待
+  if (!payload || typeof payload !== "object") {
+    throw new Error("invalid_payload_type");
+  }
+
+  return { payload };
 }

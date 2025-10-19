@@ -19,16 +19,27 @@ const router = express.Router();
 function cookieOpts() {
   return {
     httpOnly: true,
-    secure: true,
-    sameSite: 'none' as const,
+    secure: true,                 // Vercel/HTTPS 前提
+    sameSite: 'none' as const,    // クロスサイトでクッキーを返すために必須
     path: '/',
     maxAge: config.jwt.refreshTtlSec * 1000,
   };
 }
 
+// どの実装でも “payload本体” を取り出すユーティリティ
+function pickPayload<T extends object = Record<string, unknown>>(r: unknown): T {
+  if (r && typeof r === 'object') {
+    const o = r as any;
+    if (o.payload && typeof o.payload === 'object') return o.payload as T; // { payload } 形（元仕様）
+    return o as T; // payload そのものが返ってきた場合にも耐性
+  }
+  throw new Error('invalid_id_token_payload');
+}
+
 // POST /auth/login
 router.post('/login', async (req, res) => {
   try {
+    // 開発用スキップ
     if (process.env.DEV_FAKE_AUTH === '1') {
       const { line_user_id, profile } = req.body || {};
       if (!line_user_id) return res.status(400).json({ error: 'Missing line_user_id' });
@@ -50,12 +61,13 @@ router.post('/login', async (req, res) => {
     const { id_token } = req.body || {};
     if (!id_token) return res.status(400).json({ error: 'Missing id_token' });
 
-    // 遅延 import（CJS/ESM 問題回避）
+    // CJS/ESM 問題回避のため遅延 import
     const { verifyLineIdToken } = await import('../auth/lineVerify');
-    const verified = (await verifyLineIdToken(id_token)) as LineJWTPayload;
+    const verifiedRaw = await verifyLineIdToken(id_token);
+    const verified = pickPayload<LineJWTPayload>(verifiedRaw);
 
-    // 追加ログ：形の食い違い検知
-    console.log('[auth/login] typeof verified =', typeof verified, 'keys=', Object.keys(verified || {}));
+    // デバッグ（形食い違い検出用）
+    console.log('[auth/login] keys(verified)=', Object.keys(verified || {}));
 
     const uid = verified?.sub ? String(verified.sub) : '';
     if (!uid) {
@@ -89,9 +101,12 @@ router.post('/refresh', async (req, res) => {
     const token = req.cookies?.[config.jwt.refreshCookie];
     if (!token) return res.status(401).json({ error: 'no_refresh_token' });
 
-    const payload = await verifyRefresh(token); // payload は {uid, profile,...} の想定
-    const accessToken = await issueAccessToken(payload as any);
-    const refreshToken = await issueRefreshToken(payload as any);
+    // verifyRefresh の戻りも { payload } or 直接payload の両対応
+    const raw = await verifyRefresh(token);
+    const payload = pickPayload<Record<string, unknown>>(raw);
+
+    const accessToken = await issueAccessToken(payload);
+    const refreshToken = await issueRefreshToken(payload);
     res.cookie(config.jwt.refreshCookie, refreshToken, cookieOpts());
     return res.json({ accessToken });
   } catch (e) {
