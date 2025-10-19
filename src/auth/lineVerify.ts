@@ -69,6 +69,9 @@ export async function verifyLineIdToken(idToken: string) {
 
   // 検証
   const payload = jwt.verify(idToken, pem, verifyOptions);
+
+  console.log('[lineVerify] decoded payload =', payload);// for debug
+
   // jsonwebtoken は payload を object/string のどちらかで返すので object を期待
   if (!payload || typeof payload !== "object") {
     throw new Error("invalid_payload_type");
