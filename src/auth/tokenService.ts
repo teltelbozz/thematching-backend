@@ -1,44 +1,43 @@
 // src/auth/tokenService.ts
-// jsonwebtoken 版（CommonJS 互換）— HS256 で access / refresh を発行・検証
-
 import type { Request } from 'express';
-import jwt, { JwtPayload } from 'jsonwebtoken';
-import { config } from '../config/index.js';
+import jwt from 'jsonwebtoken';
+import config from '../config';
 
-const ALG = 'HS256' as const;
+const ALG: jwt.Algorithm = 'HS256';
 
 const accessSecret = config.jwt.accessSecret;
 const refreshSecret = config.jwt.refreshSecret;
 
-/** アクセストークン発行（同期） */
-export function issueAccessToken(payload: Record<string, unknown>): string {
-  return jwt.sign(payload, accessSecret, {
+function stripJwtReserved(p: Record<string, unknown>) {
+  const { exp, iat, nbf, ...rest } = p;
+  return rest;
+}
+
+export async function issueAccessToken(payload: Record<string, unknown>) {
+  const clean = stripJwtReserved(payload);
+  return jwt.sign(clean, accessSecret, {
     algorithm: ALG,
-    expiresIn: config.jwt.accessTtlSec, // 秒
+    expiresIn: config.jwt.accessTtlSec,
   });
 }
 
-/** リフレッシュトークン発行（同期） */
-export function issueRefreshToken(payload: Record<string, unknown>): string {
-  return jwt.sign(payload, refreshSecret, {
+export async function issueRefreshToken(payload: Record<string, unknown>) {
+  const clean = stripJwtReserved(payload);
+  return jwt.sign(clean, refreshSecret, {
     algorithm: ALG,
-    expiresIn: config.jwt.refreshTtlSec, // 秒
+    expiresIn: config.jwt.refreshTtlSec,
   });
 }
 
-/** アクセストークン検証（既存互換で { payload } を返す・同期） */
-export function verifyAccess(token: string): { payload: JwtPayload | string } {
-  const decoded = jwt.verify(token, accessSecret, { algorithms: [ALG] });
-  return { payload: decoded as JwtPayload | string };
+/** 署名検証（payload をそのまま返す） */
+export async function verifyAccess(token: string): Promise<Record<string, unknown>> {
+  return jwt.verify(token, accessSecret, { algorithms: [ALG] }) as any;
+}
+export async function verifyRefresh(token: string): Promise<Record<string, unknown>> {
+  return jwt.verify(token, refreshSecret, { algorithms: [ALG] }) as any;
 }
 
-/** リフレッシュトークン検証（既存互換で { payload } を返す・同期） */
-export function verifyRefreshToken(token: string): { payload: JwtPayload | string } {
-  const decoded = jwt.verify(token, refreshSecret, { algorithms: [ALG] });
-  return { payload: decoded as JwtPayload | string };
-}
-
-/** Authorization: Bearer xxx 抜き出し（同期） */
+/** Authorization: Bearer xxx 抜き出し */
 export function readBearer(req: Request): string | null {
   const h = req.headers.authorization || '';
   const m = /^Bearer\s+(.+)$/.exec(h);

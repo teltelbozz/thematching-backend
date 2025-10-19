@@ -1,6 +1,4 @@
 "use strict";
-// src/auth/tokenService.ts
-// jsonwebtoken 版（CommonJS 互換）— HS256 で access / refresh を発行・検証
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -8,38 +6,39 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.issueAccessToken = issueAccessToken;
 exports.issueRefreshToken = issueRefreshToken;
 exports.verifyAccess = verifyAccess;
-exports.verifyRefreshToken = verifyRefreshToken;
+exports.verifyRefresh = verifyRefresh;
 exports.readBearer = readBearer;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const index_js_1 = require("../config/index.js");
+const config_1 = __importDefault(require("../config"));
 const ALG = 'HS256';
-const accessSecret = index_js_1.config.jwt.accessSecret;
-const refreshSecret = index_js_1.config.jwt.refreshSecret;
-/** アクセストークン発行（同期） */
-function issueAccessToken(payload) {
-    return jsonwebtoken_1.default.sign(payload, accessSecret, {
+const accessSecret = config_1.default.jwt.accessSecret;
+const refreshSecret = config_1.default.jwt.refreshSecret;
+function stripJwtReserved(p) {
+    const { exp, iat, nbf, ...rest } = p;
+    return rest;
+}
+async function issueAccessToken(payload) {
+    const clean = stripJwtReserved(payload);
+    return jsonwebtoken_1.default.sign(clean, accessSecret, {
         algorithm: ALG,
-        expiresIn: index_js_1.config.jwt.accessTtlSec, // 秒
+        expiresIn: config_1.default.jwt.accessTtlSec,
     });
 }
-/** リフレッシュトークン発行（同期） */
-function issueRefreshToken(payload) {
-    return jsonwebtoken_1.default.sign(payload, refreshSecret, {
+async function issueRefreshToken(payload) {
+    const clean = stripJwtReserved(payload);
+    return jsonwebtoken_1.default.sign(clean, refreshSecret, {
         algorithm: ALG,
-        expiresIn: index_js_1.config.jwt.refreshTtlSec, // 秒
+        expiresIn: config_1.default.jwt.refreshTtlSec,
     });
 }
-/** アクセストークン検証（既存互換で { payload } を返す・同期） */
-function verifyAccess(token) {
-    const decoded = jsonwebtoken_1.default.verify(token, accessSecret, { algorithms: [ALG] });
-    return { payload: decoded };
+/** 署名検証（payload をそのまま返す） */
+async function verifyAccess(token) {
+    return jsonwebtoken_1.default.verify(token, accessSecret, { algorithms: [ALG] });
 }
-/** リフレッシュトークン検証（既存互換で { payload } を返す・同期） */
-function verifyRefreshToken(token) {
-    const decoded = jsonwebtoken_1.default.verify(token, refreshSecret, { algorithms: [ALG] });
-    return { payload: decoded };
+async function verifyRefresh(token) {
+    return jsonwebtoken_1.default.verify(token, refreshSecret, { algorithms: [ALG] });
 }
-/** Authorization: Bearer xxx 抜き出し（同期） */
+/** Authorization: Bearer xxx 抜き出し */
 function readBearer(req) {
     const h = req.headers.authorization || '';
     const m = /^Bearer\s+(.+)$/.exec(h);
