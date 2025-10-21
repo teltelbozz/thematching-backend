@@ -9,10 +9,15 @@ const cookie_parser_1 = __importDefault(require("cookie-parser"));
 const cors_1 = __importDefault(require("cors"));
 const morgan_1 = __importDefault(require("morgan"));
 const config_1 = __importDefault(require("./config"));
+// ★ 追加
+const db_1 = require("./db");
 const auth_1 = __importDefault(require("./routes/auth"));
 const profile_1 = __importDefault(require("./routes/profile"));
 const app = (0, express_1.default)();
+// Vercel/プロキシ越しでも Secure Cookie を有効化
 app.set('trust proxy', 1);
+// ★ 追加：ここで必ず DB を差し込む（保険）
+app.locals.db = db_1.pool;
 app.use((0, morgan_1.default)('combined'));
 app.use(express_1.default.json());
 app.use((0, cookie_parser_1.default)());
@@ -27,29 +32,4 @@ app.get('/api/health', (_req, res) => {
 });
 app.use('/api/auth', auth_1.default);
 app.use('/api/profile', profile_1.default);
-// 診断: ルート一覧
-app.get('/api/diag/routes', (_req, res) => {
-    const routes = [];
-    const stack = app?._router?.stack ?? [];
-    for (const layer of stack) {
-        if (layer.route?.path) {
-            const methods = Object.keys(layer.route.methods).filter((m) => layer.route.methods[m]);
-            for (const m of methods)
-                routes.push({ method: m.toUpperCase(), path: layer.route.path });
-        }
-        else if (layer.name === 'router' && layer.handle?.stack) {
-            for (const lr of layer.handle.stack) {
-                if (!lr.route?.path)
-                    continue;
-                const methods = Object.keys(lr.route.methods).filter((m) => lr.route.methods[m]);
-                const base = (layer?.regexp?.fast_star && '*') ||
-                    (layer?.regexp?.fast_slash && '/') ||
-                    (layer?.regexp?.source?.includes('\\/api') ? '/api' : '');
-                for (const m of methods)
-                    routes.push({ method: m.toUpperCase(), path: `${base}${lr.route.path}` });
-            }
-        }
-    }
-    res.json({ routes });
-});
 exports.default = app;
