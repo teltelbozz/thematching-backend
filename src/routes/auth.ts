@@ -30,23 +30,33 @@ function cookieOpts() {
 // POST /auth/login
 router.post('/login', async (req, res) => {
   try {
-    // --- DB フォールバック（app.locals.db が無い場合でも pool を使う）---
-    let db = req.app?.locals?.db ?? defaultPool;
+    // DB フォールバック（app.locals.db が無い場合でも pool を使う）
+    const db = (req.app?.locals?.db ?? defaultPool);
     if (!db) {
       console.error('[auth/login] no DB pool available');
       return res.status(500).json({ error: 'server_misconfigured' });
     }
-    // ここで db を使う将来拡張に備えて残しています（現状は未使用）
 
     // 開発モード：IDトークン検証スキップ
     if (process.env.DEV_FAKE_AUTH === '1') {
       const { line_user_id, profile } = req.body || {};
-      if (!line_user_id) {
-        return res.status(400).json({ error: 'Missing line_user_id' });
+      if (!line_user_id) return res.status(400).json({ error: 'Missing line_user_id' });
+
+      // ここでも内部IDに解決しておく
+      let userId: number | null = null;
+      const sel = await db.query('SELECT id FROM users WHERE line_user_id = $1', [String(line_user_id)]);
+      if (sel.rows[0]?.id) {
+        userId = sel.rows[0].id;
+      } else {
+        const ins = await db.query(
+          'INSERT INTO users (line_user_id) VALUES ($1) RETURNING id',
+          [String(line_user_id)],
+        );
+        userId = ins.rows[0].id;
       }
 
       const claims = {
-        uid: String(line_user_id),
+        uid: userId, // ← 数値IDを格納
         profile: {
           displayName: profile?.displayName ?? 'Dev User',
           picture: profile?.picture ?? null,
@@ -55,30 +65,39 @@ router.post('/login', async (req, res) => {
       const accessToken = await issueAccessToken(claims);
       const refreshToken = await issueRefreshToken(claims);
       res.cookie(config.jwt.refreshCookie, refreshToken, cookieOpts());
-      console.log('[auth/login] devAuth OK:', line_user_id);
+      console.log('[auth/login] devAuth OK:', line_user_id, '-> uid:', userId);
       return res.json({ accessToken });
     }
 
     // 本番：LINE ID トークン検証
     const { id_token } = req.body || {};
-    if (!id_token) {
-      return res.status(400).json({ error: 'Missing id_token' });
-    }
+    if (!id_token) return res.status(400).json({ error: 'Missing id_token' });
 
-    // 遅延 import（CJS/ESM 問題回避）
     const { verifyLineIdToken } = await import('../auth/lineVerify');
-    // lineVerify は { payload } を返す契約
     const { payload } = await verifyLineIdToken(id_token);
     const verified = payload as LineJWTPayload;
 
-    const uid = verified?.sub ? String(verified.sub) : '';
-    if (!uid) {
+    const lineSub = verified?.sub ? String(verified.sub) : '';
+    if (!lineSub) {
       console.error('[auth/login] invalid_sub in id_token payload:', verified);
       return res.status(400).json({ error: 'invalid_sub' });
     }
 
+    // ★ sub -> users.id（数値）に解決（なければ INSERT）
+    let userId: number | null = null;
+    const r1 = await db.query('SELECT id FROM users WHERE line_user_id = $1', [lineSub]);
+    if (r1.rows[0]?.id) {
+      userId = r1.rows[0].id;
+    } else {
+      const r2 = await db.query(
+        'INSERT INTO users (line_user_id) VALUES ($1) RETURNING id',
+        [lineSub],
+      );
+      userId = r2.rows[0].id;
+    }
+
     const claims = {
-      uid,
+      uid: userId, // ← 数値ID
       profile: {
         displayName: verified.name ?? 'LINE User',
         picture: verified.picture ?? null,
@@ -89,7 +108,7 @@ router.post('/login', async (req, res) => {
     const refreshToken = await issueRefreshToken(claims);
     res.cookie(config.jwt.refreshCookie, refreshToken, cookieOpts());
 
-    console.log('[auth/login] LINE verified:', uid);
+    console.log('[auth/login] LINE verified:', lineSub, '-> uid:', userId);
     return res.json({ accessToken });
   } catch (e) {
     console.error('[auth/login]', e);
