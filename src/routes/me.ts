@@ -37,18 +37,12 @@ router.get('/', async (req, res) => {
 
     // プロフィール存在チェック
     const profileRes = await db.query(
-      `SELECT nickname, age, gender, occupation
-         FROM user_profiles WHERE user_id = $1`,
+      `SELECT 1 FROM user_profiles WHERE user_id = $1 LIMIT 1`,
       [userId],
     );
 
-    const profile = profileRes.rows[0];
-    const hasProfile =
-      !!profile &&
-      !!profile.nickname &&
-      !!profile.age &&
-      !!profile.gender &&
-      !!profile.occupation;
+    // ✅ 行が存在すれば hasProfile = true
+    const hasProfile = profileRes.rows.length > 0;
 
     return res.json({ userId, hasProfile });
   } catch (e: any) {
