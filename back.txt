@@ -1,0 +1,62 @@
+./src/routes/matches.ts:6:// POST /matches
+./src/routes/matches.ts:13:    `INSERT INTO matches (slot_id, status, confirmed_at)
+./src/routes/matches.ts:21:    `INSERT INTO chat_rooms (match_id)
+./src/routes/profile.ts:27:      'SELECT id FROM users WHERE line_user_id = $1 LIMIT 1',
+./src/routes/profile.ts:33:      'INSERT INTO users (line_user_id) VALUES ($1) RETURNING id',
+./src/routes/profile.ts:64:         FROM users u
+./src/routes/profile.ts:65:    LEFT JOIN user_profiles p ON p.user_id = u.id
+./src/routes/profile.ts:124:      `INSERT INTO user_profiles (user_id, nickname, age, gender, occupation, photo_url, photo_masked_url)
+./src/routes/profile.ts:127:         nickname = COALESCE(EXCLUDED.nickname, user_profiles.nickname),
+./src/routes/profile.ts:128:         age = COALESCE(EXCLUDED.age, user_profiles.age),
+./src/routes/profile.ts:129:         gender = COALESCE(EXCLUDED.gender, user_profiles.gender),
+./src/routes/profile.ts:130:         occupation = COALESCE(EXCLUDED.occupation, user_profiles.occupation),
+./src/routes/profile.ts:131:         photo_url = COALESCE(EXCLUDED.photo_url, user_profiles.photo_url),
+./src/routes/profile.ts:132:         photo_masked_url = COALESCE(EXCLUDED.photo_masked_url, user_profiles.photo_masked_url),
+./src/routes/profile.ts:149:         FROM users u
+./src/routes/profile.ts:150:    LEFT JOIN user_profiles p ON p.user_id = u.id
+./src/routes/auth.ts:47:      const sel = await db.query('SELECT id FROM users WHERE line_user_id = $1', [String(line_user_id)]);
+./src/routes/auth.ts:52:          'INSERT INTO users (line_user_id) VALUES ($1) RETURNING id',
+./src/routes/auth.ts:86:    // ★ sub -> users.id（数値）に解決（なければ INSERT）
+./src/routes/auth.ts:88:    const r1 = await db.query('SELECT id FROM users WHERE line_user_id = $1', [lineSub]);
+./src/routes/auth.ts:93:        'INSERT INTO users (line_user_id) VALUES ($1) RETURNING id',
+./src/routes/payments.ts:29:      `UPDATE users SET payment_method_set = true WHERE id = $1`,
+./src/routes/reviews.ts:6:// POST /reviews
+./src/routes/reviews.ts:13:    `INSERT INTO reviews (match_id, user_id, rating, comment)
+./src/routes/chats.ts:6:// GET /chats/:roomId/messages
+./src/routes/chats.ts:7:router.get('/:roomId/messages', async (req, res) => {
+./src/routes/chats.ts:13:     FROM chat_messages
+./src/routes/chats.ts:22:// POST /chats/:roomId/messages
+./src/routes/chats.ts:23:router.post('/:roomId/messages', async (req, res) => {
+./src/routes/chats.ts:30:    `INSERT INTO chat_messages (room_id, user_id, body)
+./src/repositories/userRepo.ts:7:      INSERT INTO users (line_user_id, email)
+./src/repositories/userRepo.ts:14:    SELECT id FROM users WHERE line_user_id = $1
+./src/repositories/userRepo.ts:23:    INSERT INTO user_profiles (user_id, nickname, photo_url)
+./src/repositories/userRepo.ts:26:      SET nickname = COALESCE(EXCLUDED.nickname, user_profiles.nickname),
+./src/repositories/userRepo.ts:27:          photo_url = COALESCE(EXCLUDED.photo_url, user_profiles.photo_url),
+./src/repositories/userRepo.ts:39:    FROM users u
+./src/repositories/userRepo.ts:40:    LEFT JOIN user_profiles p ON p.user_id = u.id
+./src/routes/slots.ts:12:    FROM party_slots
+./src/routes/slots.ts:27:    INSERT INTO party_slots
+./src/routes/slots.ts:47:    INSERT INTO slot_participants (slot_id, user_id)
+./src/routes/prefs.ts:24:       FROM user_match_prefs WHERE user_id = $1`,
+./src/routes/prefs.ts:54:      `INSERT INTO user_match_prefs (user_id, participation_style, party_size, type_mode, venue_pref, cost_pref, saved_dates)
+./src/routes/prefs.ts:57:         participation_style = COALESCE(EXCLUDED.participation_style, user_match_prefs.participation_style),
+./src/routes/prefs.ts:58:         party_size          = COALESCE(EXCLUDED.party_size,          user_match_prefs.party_size),
+./src/routes/prefs.ts:59:         type_mode           = COALESCE(EXCLUDED.type_mode,           user_match_prefs.type_mode),
+./src/routes/prefs.ts:60:         venue_pref          = COALESCE(EXCLUDED.venue_pref,          user_match_prefs.venue_pref),
+./src/routes/prefs.ts:61:         cost_pref           = COALESCE(EXCLUDED.cost_pref,           user_match_prefs.cost_pref),
+./src/routes/prefs.ts:62:         saved_dates         = COALESCE(EXCLUDED.saved_dates,         user_match_prefs.saved_dates),
+./src/routes/prefs.ts:69:       FROM user_match_prefs WHERE user_id = $1`,
+./src/routes/verify.ts:25:      `UPDATE user_profiles SET verified_age = true, updated_at = NOW()
+./src/routes/verify.ts:31:      `SELECT verified_age FROM user_profiles WHERE user_id = $1`,
+./src/routes/setup.ts:29:         FROM user_match_setup
+./src/routes/setup.ts:92:      `INSERT INTO user_match_setup (
+./src/routes/setup.ts:98:          participation_style = COALESCE(EXCLUDED.participation_style, user_match_setup.participation_style),
+./src/routes/setup.ts:99:          party_size          = COALESCE(EXCLUDED.party_size,          user_match_setup.party_size),
+./src/routes/setup.ts:100:          desired_date        = COALESCE(EXCLUDED.desired_date,        user_match_setup.desired_date),
+./src/routes/setup.ts:101:          type_mode           = COALESCE(EXCLUDED.type_mode,           user_match_setup.type_mode),
+./src/routes/setup.ts:102:          venue_pref          = COALESCE(EXCLUDED.venue_pref,          user_match_setup.venue_pref),
+./src/routes/setup.ts:103:          cost_pref           = COALESCE(EXCLUDED.cost_pref,           user_match_setup.cost_pref),
+./src/routes/setup.ts:119:         FROM user_match_setup
+./src/middleware/devAuth.ts:28:    // users に upsert（line_user_id は一意の想定）
+./src/middleware/devAuth.ts:30:      `insert into users(line_user_id, email)
