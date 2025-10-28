@@ -194,7 +194,7 @@ router.put('/', async (req, res) => {
 
     // 正規化
     const payload = {
-      purpose: toStr(input.purpose, null),
+      purpose: toStr(input.purpose, undefined),
       partner_age_min: toInt(input.partner_age_min, null as any),
       partner_age_max: toInt(input.partner_age_max, null as any),
       partner_gender: toStr(input.partner_gender, 'any'),
