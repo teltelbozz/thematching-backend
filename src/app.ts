@@ -5,6 +5,8 @@ import cors from 'cors';
 import morgan from 'morgan';
 import config from './config';
 import meRoutes from './routes/me' 
+import matchPrefsRoutes from './routes/matchPrefs';
+
 
 // ★ 追加
 import { pool } from './db';
@@ -40,5 +42,6 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/me', meRoutes);
+app.use('/api/match-prefs', matchPrefsRoutes); 
 
 export default app;
