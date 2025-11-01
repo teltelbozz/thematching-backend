@@ -6,6 +6,8 @@ import morgan from 'morgan';
 import config from './config';
 import meRoutes from './routes/me' 
 import matchPrefsRoutes from './routes/matchPrefs';
+import setupRoutes from './routes/setup';
+import requireAuth from './middleware/requireAuth'; // 既存
 
 
 // ★ 追加
@@ -43,5 +45,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/me', meRoutes);
 app.use('/api/match-prefs', matchPrefsRoutes); 
+app.use('/api/setup', requireAuth, setupRoutes);
 
 export default app;

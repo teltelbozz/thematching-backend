@@ -11,6 +11,8 @@ const morgan_1 = __importDefault(require("morgan"));
 const config_1 = __importDefault(require("./config"));
 const me_1 = __importDefault(require("./routes/me"));
 const matchPrefs_1 = __importDefault(require("./routes/matchPrefs"));
+const setup_1 = __importDefault(require("./routes/setup"));
+const requireAuth_1 = __importDefault(require("./middleware/requireAuth")); // 既存
 // ★ 追加
 const db_1 = require("./db");
 const auth_1 = __importDefault(require("./routes/auth"));
@@ -36,4 +38,5 @@ app.use('/api/auth', auth_1.default);
 app.use('/api/profile', profile_1.default);
 app.use('/api/me', me_1.default);
 app.use('/api/match-prefs', matchPrefs_1.default);
+app.use('/api/setup', requireAuth_1.default, setup_1.default);
 exports.default = app;
