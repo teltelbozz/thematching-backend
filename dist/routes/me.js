@@ -1,13 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-// src/routes/me.ts
 const express_1 = require("express");
 const tokenService_1 = require("../auth/tokenService");
 const router = (0, express_1.Router)();
 /**
  * GET /api/me
- * 現在ログイン中のユーザー情報を返す。
- * - userId: DB上のユーザーID
+ * - userId: ユーザーID
  * - hasProfile: プロフィール登録済みか
  * - gender: 'male' | 'female' | null
  */
@@ -26,12 +24,11 @@ router.get('/', async (req, res) => {
             console.error('[me:get] db_not_initialized');
             return res.status(500).json({ error: 'server_error' });
         }
-        // users ← (uid は users.id か users.line_user_id のどちらか)
-        // user_profiles を LEFT JOIN して gender と hasProfile を同時取得
+        // user_profilesにidカラムがない（主キーはuser_id）
         const q = `
       SELECT
         u.id AS user_id,
-        (p.id IS NOT NULL) AS has_profile,
+        EXISTS (SELECT 1 FROM user_profiles p2 WHERE p2.user_id = u.id) AS has_profile,
         p.gender AS gender
       FROM users u
       LEFT JOIN user_profiles p ON p.user_id = u.id
@@ -42,12 +39,11 @@ router.get('/', async (req, res) => {
         const row = rows[0];
         if (!row?.user_id)
             return res.status(401).json({ error: 'unauthenticated' });
-        // gender は 'male' | 'female' | null を想定
         const gender = row.gender === 'male' || row.gender === 'female' ? row.gender : null;
         return res.json({
             userId: row.user_id,
             hasProfile: !!row.has_profile,
-            gender, // ← 追加
+            gender, // ← これを追加
         });
     }
     catch (e) {
