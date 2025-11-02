@@ -1,10 +1,8 @@
-// src/routes/setup.ts
 import { Router, Request, Response } from 'express';
-import { pool } from '../db'; // ★ defaultではなく名前付きimport
+import { pool } from '../db';
 
 const router = Router();
 
-// ---- 型（フロントのDTOと一致） ----
 type CandidateSlot = { date: string; time: '19:00' | '21:00' };
 type SetupDTO = {
   type_mode: 'wine_talk' | 'wine_and_others';
@@ -14,7 +12,7 @@ type SetupDTO = {
   cost_pref: 'men_pay_all' | 'split_even' | 'follow_partner';
 };
 
-// ---- ユーティリティ ----
+// JSTの週キー（簡易）
 function toWeekKeyJST(d: Date): string {
   const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
   const start = new Date(Date.UTC(jst.getUTCFullYear(), 0, 1));
@@ -27,72 +25,59 @@ function toWeekKeyJST(d: Date): string {
 function parseSlotToTz(slot: CandidateSlot): Date {
   return new Date(`${slot.date}T${slot.time}:00+09:00`);
 }
-
 function isPastDeadline(slot: CandidateSlot, now = new Date()): boolean {
-  const slotDt = parseSlotToTz(slot); // JST
+  const slotDt = parseSlotToTz(slot);
   const dl = new Date(slotDt.getTime() - 2 * 24 * 60 * 60 * 1000);
-  dl.setHours(20, 0, 0, 0); // 2日前 20:00 JST
+  dl.setHours(20, 0, 0, 0);
   return now.getTime() > dl.getTime();
 }
-
 function isFriOrSat(slot: CandidateSlot): boolean {
   const dt = parseSlotToTz(slot);
-  const w = dt.getDay(); // 0=Sun..6=Sat（環境ローカル）
+  const w = dt.getDay();
   return w === 5 || w === 6;
 }
-
-function isValidTime(t: string): t is '19:00' | '21:00' {
+function isValidTime(t: string): t is '19:00'|'21:00' {
   return t === '19:00' || t === '21:00';
 }
 
 function validatePayload(p: any): asserts p is SetupDTO {
   const errors: string[] = [];
   if (!p || typeof p !== 'object') errors.push('payload required');
-
-  if (!['wine_talk', 'wine_and_others'].includes(p?.type_mode))
-    errors.push('type_mode invalid');
-
-  if (p?.location !== 'shibuya_shinjuku')
-    errors.push('location must be shibuya_shinjuku (fixed)');
-
-  if (!['men_pay_all', 'split_even', 'follow_partner'].includes(p?.cost_pref))
-    errors.push('cost_pref invalid');
+  if (!['wine_talk','wine_and_others'].includes(p?.type_mode)) errors.push('type_mode invalid');
+  if (p?.location !== 'shibuya_shinjuku') errors.push('location must be shibuya_shinjuku');
+  if (!['men_pay_all','split_even','follow_partner'].includes(p?.cost_pref)) errors.push('cost_pref invalid');
 
   const cs = p?.candidate_slots;
   if (!Array.isArray(cs) || cs.length < 1) {
     errors.push('candidate_slots must be non-empty array');
   } else {
     for (const s of cs) {
-      if (!s?.date || typeof s.date !== 'string') errors.push('slot.date required');
+      if (!s?.date) errors.push('slot.date required');
       if (!isValidTime(s?.time)) errors.push('slot.time must be 19:00 or 21:00');
       if (!isFriOrSat(s)) errors.push(`slot ${s?.date} not Fri/Sat`);
       if (isPastDeadline(s)) errors.push(`slot ${s?.date} ${s?.time} past deadline`);
     }
   }
-
   if (errors.length) {
-    const err = new Error('validation_error: ' + errors.join(', '));
-    (err as any).status = 400;
+    const err: any = new Error('validation_error: ' + errors.join(', '));
+    err.status = 400;
     throw err;
   }
 }
 
-// ---- GET /api/setup ----
+// GET /api/setup : 最新の保存内容を返す
 router.get('/', async (req: Request, res: Response) => {
-  const userId = (req as any).userId as number | string;
+  const userId = (req as any).userId;
   if (!userId) return res.status(401).json({ error: 'unauthorized' });
 
   const latest = await pool.query(
-    `
-      SELECT id, week_key, type_mode, location, cost_pref, venue_pref, submitted_at
-      FROM user_setup
-      WHERE user_id = $1
-      ORDER BY submitted_at DESC
-      LIMIT 1
-    `,
+    `SELECT id, type_mode, location, cost_pref, venue_pref
+     FROM user_setup
+     WHERE user_id = $1
+     ORDER BY submitted_at DESC
+     LIMIT 1`,
     [userId]
   );
-
   if (latest.rowCount === 0) return res.json({ setup: null });
 
   const setupRow = latest.rows[0];
@@ -118,17 +103,15 @@ router.get('/', async (req: Request, res: Response) => {
     venue_pref: setupRow.venue_pref ?? null,
     cost_pref: setupRow.cost_pref,
   };
-
   return res.json({ setup: resp });
 });
 
-// ---- PUT /api/setup ----
+// PUT /api/setup : 保存（1回の保存でヘッダ+スロットを丸ごと置き換え）
 router.put('/', async (req: Request, res: Response) => {
-  const userId = (req as any).userId as number | string;
+  const userId = (req as any).userId;
   if (!userId) return res.status(401).json({ error: 'unauthorized' });
 
   const payload = req.body;
-
   try {
     validatePayload(payload);
   } catch (e: any) {
@@ -143,34 +126,32 @@ router.put('/', async (req: Request, res: Response) => {
     await client.query('BEGIN');
 
     const inserted = await client.query(
-      `
-        INSERT INTO user_setup
-          (user_id, week_key, type_mode, location, cost_pref, venue_pref, submitted_at)
-        VALUES ($1, $2, $3, $4, $5, NULL, now())
-        RETURNING id
-      `,
+      `INSERT INTO user_setup
+        (user_id, week_key, type_mode, location, cost_pref, venue_pref, submitted_at)
+       VALUES ($1, $2, $3, $4, $5, NULL, now())
+       RETURNING id`,
       [userId, weekKey, payload.type_mode, payload.location, payload.cost_pref]
     );
-    const setupId = inserted.rows[0].id as number;
+    const setupId = inserted.rows[0].id;
 
-    // スロット一括INSERT
     if (payload.candidate_slots?.length) {
       const values: any[] = [];
       const placeholders: string[] = [];
-      payload.candidate_slots.forEach((s: CandidateSlot, i: number) => {
+      payload.candidate_slots.forEach((s) => {
         values.push(setupId);
-        const dt = parseSlotToTz(s);
-        values.push(dt.toISOString());
+        values.push(parseSlotToTz(s).toISOString());
         placeholders.push(`($${values.length - 1}, $${values.length})`);
       });
 
       await client.query(
-        `INSERT INTO user_setup_slots (user_setup_id, slot_dt) VALUES ${placeholders.join(',')}`,
+        `INSERT INTO user_setup_slots (user_setup_id, slot_dt)
+         VALUES ${placeholders.join(',')}`,
         values
       );
     }
 
     await client.query('COMMIT');
+    return res.json({ setup: payload as SetupDTO });
   } catch (e) {
     await client.query('ROLLBACK');
     console.error('[setup.put] tx error:', e);
@@ -178,8 +159,6 @@ router.put('/', async (req: Request, res: Response) => {
   } finally {
     client.release();
   }
-
-  return res.json({ setup: payload as SetupDTO });
 });
 
 export default router;
