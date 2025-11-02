@@ -5,10 +5,11 @@ const express_1 = require("express");
 const tokenService_1 = require("../auth/tokenService");
 const router = (0, express_1.Router)();
 /**
- * /api/me
+ * GET /api/me
  * 現在ログイン中のユーザー情報を返す。
  * - userId: DB上のユーザーID
- * - hasProfile: user_profilesに登録があるかどうか
+ * - hasProfile: プロフィール登録済みか
+ * - gender: 'male' | 'female' | null
  */
 router.get('/', async (req, res) => {
     try {
@@ -25,16 +26,29 @@ router.get('/', async (req, res) => {
             console.error('[me:get] db_not_initialized');
             return res.status(500).json({ error: 'server_error' });
         }
-        // ユーザー存在チェック
-        const userRes = await db.query('SELECT id FROM users WHERE id = $1 OR line_user_id = $2 LIMIT 1', [uid, uid]);
-        const userId = userRes.rows[0]?.id;
-        if (!userId)
+        // users ← (uid は users.id か users.line_user_id のどちらか)
+        // user_profiles を LEFT JOIN して gender と hasProfile を同時取得
+        const q = `
+      SELECT
+        u.id AS user_id,
+        (p.id IS NOT NULL) AS has_profile,
+        p.gender AS gender
+      FROM users u
+      LEFT JOIN user_profiles p ON p.user_id = u.id
+      WHERE u.id = $1 OR u.line_user_id = $2
+      LIMIT 1
+    `;
+        const { rows } = await db.query(q, [uid, uid]);
+        const row = rows[0];
+        if (!row?.user_id)
             return res.status(401).json({ error: 'unauthenticated' });
-        // プロフィール存在チェック
-        const profileRes = await db.query(`SELECT 1 FROM user_profiles WHERE user_id = $1 LIMIT 1`, [userId]);
-        // ✅ 行が存在すれば hasProfile = true
-        const hasProfile = profileRes.rows.length > 0;
-        return res.json({ userId, hasProfile });
+        // gender は 'male' | 'female' | null を想定
+        const gender = row.gender === 'male' || row.gender === 'female' ? row.gender : null;
+        return res.json({
+            userId: row.user_id,
+            hasProfile: !!row.has_profile,
+            gender, // ← 追加
+        });
     }
     catch (e) {
         console.error('[me:get]', e?.message || e);
