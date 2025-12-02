@@ -8,6 +8,9 @@ import meRoutes from './routes/me'
 import matchPrefsRoutes from './routes/matchPrefs';
 import setupRoutes from './routes/setup';
 import requireAuth from './middleware/requireAuth'; // 既存
+import groupsRouter from "./routes/groups";
+import matchCron from "./cron/matchCron";
+import cronRouter from './routes/cron';
 
 
 // ★ 追加
@@ -46,5 +49,8 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/me', meRoutes);
 app.use('/api/match-prefs', matchPrefsRoutes); 
 app.use('/api/setup', requireAuth, setupRoutes);
+app.use("/groups", groupsRouter);//参加URL生成
+app.use("/cron", matchCron); // マッチング定期実行
+app.use('/cron', cronRouter);
 
 export default app;

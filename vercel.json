@@ -1,4 +1,14 @@
 {
   "version": 2,
-  "routes": [{ "src": "/(.*)", "dest": "dist/index.js" }]
+  "routes": [{ "src": "/(.*)", "dest": "dist/index.js" }],
+  "crons": [
+    {
+      "path": "/cron/matching",
+      "schedule": "0 11 * * 4"
+    },
+    {
+      "path": "/cron/matching",
+      "schedule": "0 11 * * 5"
+    }
+  ]
 }
