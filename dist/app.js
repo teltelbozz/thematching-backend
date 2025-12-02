@@ -13,6 +13,9 @@ const me_1 = __importDefault(require("./routes/me"));
 const matchPrefs_1 = __importDefault(require("./routes/matchPrefs"));
 const setup_1 = __importDefault(require("./routes/setup"));
 const requireAuth_1 = __importDefault(require("./middleware/requireAuth")); // 既存
+const groups_1 = __importDefault(require("./routes/groups"));
+const matchCron_1 = __importDefault(require("./cron/matchCron"));
+const cron_1 = __importDefault(require("./routes/cron"));
 // ★ 追加
 const db_1 = require("./db");
 const auth_1 = __importDefault(require("./routes/auth"));
@@ -39,4 +42,7 @@ app.use('/api/profile', profile_1.default);
 app.use('/api/me', me_1.default);
 app.use('/api/match-prefs', matchPrefs_1.default);
 app.use('/api/setup', requireAuth_1.default, setup_1.default);
+app.use("/groups", groups_1.default); //参加URL生成
+app.use("/cron", matchCron_1.default); // マッチング定期実行
+app.use('/cron', cron_1.default);
 exports.default = app;
