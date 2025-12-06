@@ -8,8 +8,8 @@ function getJstDateKey(offsetDays = 1) {
     const target = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offsetDays);
     const yyyy = target.getFullYear();
     const mm = String(target.getMonth() + 1).padStart(2, "0");
-    const dd = String(target.getDate() + 0).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
+    const dd = String(target.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`; // 例: "2025-12-05"
 }
 /**
  * メイン関数
@@ -29,41 +29,74 @@ async function executeMatchCron(pool) {
             ok: true,
             message: `no slots for ${dateKey}`,
             date: dateKey,
+            slotCount: 0,
+            results: [],
         };
     }
     const results = [];
     // 履歴は1回だけ読む（※slot毎に変えたいならここを中に移動）
     const history = await (0, matching_1.getHistoryEdges)();
+    console.log(`[cron] history edges = ${history.size}`);
     for (const slotDt of slotList) {
-        console.log(`\n[cron] ===== slot ${slotDt} =====`);
-        // ② エントリユーザ取得
-        const entries = await (0, matching_1.getEntriesForSlot)(slotDt);
-        if (entries.length === 0) {
-            console.log(`[cron] no entries for slot=${slotDt}`);
-            results.push({ slotDt, matchedCount: 0, unmatchedCount: 0 });
-            continue;
-        }
-        // ③ location & type_mode は entries から抽出（仕様上、単一前提）
-        const locations = Array.from(new Set(entries.map((e) => e.location)));
-        const types = Array.from(new Set(entries.map((e) => e.type_mode)));
-        if (locations.length !== 1 || types.length !== 1) {
-            console.warn(`[cron] inconsistent location/type_mode for slot=${slotDt}`, { locations, types });
-            continue;
-        }
-        const location = locations[0];
-        const typeMode = types[0];
-        // ④ マッチング実行（年齢 + history のみ）
-        const { matched, unmatched } = (0, matching_1.computeMatchesForSlot)(entries, history);
-        console.log(`[cron] matched groups=${matched.length}, unmatched users=${unmatched.length}`);
-        // ⑤ DB 保存
-        await (0, matching_1.saveMatchesForSlot)(pool, slotDt, location, typeMode, matched);
-        // ⑥ token 付与
-        await (0, matching_1.assignTokensForSlot)(pool, slotDt, location, typeMode);
-        results.push({
-            slotDt,
-            matchedCount: matched.length,
-            unmatchedCount: unmatched.length,
+        const jstLabel = new Date(slotDt).toLocaleString("ja-JP", {
+            timeZone: "Asia/Tokyo",
         });
+        console.log(`\n[cron] ===== slot ${slotDt} (JST=${jstLabel}) =====`);
+        try {
+            // ② エントリユーザ取得
+            const entries = await (0, matching_1.getEntriesForSlot)(slotDt);
+            console.log(`[cron] entries count = ${entries.length}`);
+            if (entries.length === 0) {
+                console.log(`[cron] no entries for slot=${slotDt}`);
+                results.push({
+                    slotDt,
+                    matchedCount: 0,
+                    unmatchedCount: 0,
+                    entriesCount: 0,
+                });
+                continue;
+            }
+            // ③ location & type_mode は entries から抽出（仕様上、単一前提）
+            const locations = Array.from(new Set(entries.map((e) => e.location)));
+            const types = Array.from(new Set(entries.map((e) => e.type_mode)));
+            if (locations.length !== 1 || types.length !== 1) {
+                console.warn(`[cron] inconsistent location/type_mode for slot=${slotDt}`, { locations, types });
+                results.push({
+                    slotDt,
+                    matchedCount: 0,
+                    unmatchedCount: entries.length,
+                    entriesCount: entries.length,
+                    error: "inconsistent location/type_mode",
+                });
+                continue;
+            }
+            const location = locations[0];
+            const typeMode = types[0];
+            // ④ マッチング実行（年齢 + history のみ）
+            const { matched, unmatched } = (0, matching_1.computeMatchesForSlot)(entries, history);
+            console.log(`[cron] matched groups=${matched.length}, unmatched users=${unmatched.length}`);
+            // ⑤ DB 保存
+            await (0, matching_1.saveMatchesForSlot)(pool, slotDt, location, typeMode, matched);
+            // ⑥ token 付与
+            await (0, matching_1.assignTokensForSlot)(pool, slotDt, location, typeMode);
+            results.push({
+                slotDt,
+                matchedCount: matched.length,
+                unmatchedCount: unmatched.length,
+                entriesCount: entries.length,
+            });
+        }
+        catch (e) {
+            console.error(`[cron] error on slot=${slotDt}`, e);
+            results.push({
+                slotDt,
+                matchedCount: 0,
+                unmatchedCount: 0,
+                error: e?.message || "unknown error",
+            });
+            // 次の slot に継続
+            continue;
+        }
     }
     return {
         ok: true,

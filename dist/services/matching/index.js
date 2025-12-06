@@ -19,3 +19,4 @@ __exportStar(require("./engine"), exports);
 __exportStar(require("./repository"), exports);
 __exportStar(require("./save"), exports);
 __exportStar(require("./assign"), exports);
+__exportStar(require("./run"), exports); // ← これ追加
