@@ -19,6 +19,8 @@ async function getSlotsForDate(date) {
 }
 /**
  * ある slot_dt にエントリしているユーザ一覧を取得
+ * ★ 改善点：
+ *   - user_setup.status = 'active' を条件に追加（processed の応募は無視）
  */
 async function getEntriesForSlot(slotDt) {
     const { rows } = await db_1.pool.query(`
@@ -33,18 +35,19 @@ async function getEntriesForSlot(slotDt) {
       JOIN users u             ON u.id = s.user_id
       JOIN user_profiles p     ON p.user_id = u.id
     WHERE sl.slot_dt = $1
+      AND s.status = 'active'   -- ★ 追加：processed を無視する
     ORDER BY u.id
     `, [slotDt]);
     return rows.map((r) => ({
         user_id: Number(r.user_id),
-        gender: r.gender === "female" ? "female" : "male", // 万一の値崩れに備えて二値に丸める
+        gender: r.gender === "female" ? "female" : "male",
         age: Number(r.age),
         type_mode: r.type_mode,
         location: r.location,
     }));
 }
 /**
- * match_history を全件取得して「禁止ペア集合」として返す
+ * match_history を Set<string> として返す
  * 形式: "minId-maxId"
  */
 async function getHistoryEdges() {

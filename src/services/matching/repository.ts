@@ -20,42 +20,42 @@ export async function getSlotsForDate(date: string): Promise<string[]> {
 
 /**
  * ある slot_dt にエントリしているユーザ一覧を取得
+ * ★ 改善点：
+ *   - user_setup.status = 'active' を条件に追加（processed の応募は無視）
  */
-// src/services/matching/repository.ts の中にある関数
 export async function getEntriesForSlot(slotDt: string): Promise<SlotEntry[]> {
-  const { rows } = await db.query(
+  const { rows } = await pool.query(
     `
     SELECT
-      u.id AS user_id,
-      p.gender AS gender,
-      p.age AS age,
+      u.id        AS user_id,
+      p.gender    AS gender,
+      p.age       AS age,
       s.type_mode AS type_mode,
-      s.location AS location
+      s.location  AS location
     FROM user_setup s
-    JOIN user_setup_slots sl
-      ON sl.user_setup_id = s.id
-    JOIN users u
-      ON s.user_id = u.id
-    JOIN user_profiles p
-      ON p.user_id = u.id
+      JOIN user_setup_slots sl ON sl.user_setup_id = s.id
+      JOIN users u             ON u.id = s.user_id
+      JOIN user_profiles p     ON p.user_id = u.id
     WHERE sl.slot_dt = $1
-      AND s.status = 'active'        -- 🔥 改善ポイント（明示的に active のみ）
+      AND s.status = 'active'   -- ★ 追加：processed を無視する
     ORDER BY u.id
     `,
     [slotDt]
   );
 
-  return rows.map((r) => ({
-    user_id: r.user_id,
-    gender: r.gender === "male" || r.gender === "female" ? r.gender : "male",
-    age: Number(r.age),
-    type_mode: r.type_mode,
-    location: r.location,
-  }));
+  return rows.map(
+    (r: any): SlotEntry => ({
+      user_id: Number(r.user_id),
+      gender: r.gender === "female" ? "female" : "male",
+      age: Number(r.age),
+      type_mode: r.type_mode,
+      location: r.location,
+    })
+  );
 }
 
 /**
- * match_history を全件取得して「禁止ペア集合」として返す
+ * match_history を Set<string> として返す
  * 形式: "minId-maxId"
  */
 export async function getHistoryEdges(): Promise<Set<string>> {
