@@ -50,7 +50,6 @@ app.use('/api/me', meRoutes);
 app.use('/api/match-prefs', matchPrefsRoutes); 
 app.use('/api/setup', requireAuth, setupRoutes);
 app.use("/groups", groupsRouter);//参加URL生成
-app.use("/cron", matchCron); // マッチング定期実行
 app.use('/cron', cronRouter);
 
 export default app;
