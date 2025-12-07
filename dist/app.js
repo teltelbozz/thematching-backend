@@ -16,6 +16,7 @@ const requireAuth_1 = __importDefault(require("./middleware/requireAuth")); // �
 const groups_1 = __importDefault(require("./routes/groups"));
 const cron_1 = __importDefault(require("./routes/cron"));
 const matchingResult_1 = __importDefault(require("./routes/matchingResult")); //マッチング結果を返す
+const path_1 = __importDefault(require("path"));
 // ★ 追加
 const db_1 = require("./db");
 const auth_1 = __importDefault(require("./routes/auth"));
@@ -44,5 +45,7 @@ app.use('/api/match-prefs', matchPrefs_1.default);
 app.use('/api/setup', requireAuth_1.default, setup_1.default);
 app.use("/groups", groups_1.default); //参加URL生成
 app.use('/cron', cron_1.default);
-app.use('/admin', matchingResult_1.default);
+app.use('/admin', matchingResult_1.default); //マッチング結果を返す
+// 静的ファイル配信（matching-demo.html など）
+app.use(express_1.default.static(path_1.default.join(__dirname, "../public")));
 exports.default = app;

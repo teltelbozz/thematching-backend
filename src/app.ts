@@ -12,6 +12,7 @@ import groupsRouter from "./routes/groups";
 import matchCron from "./cron/matchCron";
 import cronRouter from './routes/cron';
 import matchingResultRouter from './routes/matchingResult'; //マッチング結果を返す
+import path from "path";
 
 
 // ★ 追加
@@ -53,5 +54,7 @@ app.use('/api/setup', requireAuth, setupRoutes);
 app.use("/groups", groupsRouter);//参加URL生成
 app.use('/cron', cronRouter);
 app.use('/admin', matchingResultRouter); //マッチング結果を返す
+// 静的ファイル配信（matching-demo.html など）
+app.use(express.static(path.join(__dirname, "../public")));
 
 export default app;
