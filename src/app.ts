@@ -11,6 +11,7 @@ import requireAuth from './middleware/requireAuth'; // 既存
 import groupsRouter from "./routes/groups";
 import matchCron from "./cron/matchCron";
 import cronRouter from './routes/cron';
+import matchingResultRouter from './routes/matchingResult'; //マッチング結果を返す
 
 
 // ★ 追加
@@ -51,5 +52,6 @@ app.use('/api/match-prefs', matchPrefsRoutes);
 app.use('/api/setup', requireAuth, setupRoutes);
 app.use("/groups", groupsRouter);//参加URL生成
 app.use('/cron', cronRouter);
+app.use('/admin', matchingResultRouter);
 
 export default app;
