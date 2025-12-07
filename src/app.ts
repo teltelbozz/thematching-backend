@@ -52,6 +52,6 @@ app.use('/api/match-prefs', matchPrefsRoutes);
 app.use('/api/setup', requireAuth, setupRoutes);
 app.use("/groups", groupsRouter);//参加URL生成
 app.use('/cron', cronRouter);
-app.use('/admin', matchingResultRouter);
+app.use('/admin', matchingResultRouter); //マッチング結果を返す
 
 export default app;
