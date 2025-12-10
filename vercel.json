@@ -1,6 +1,11 @@
 {
   "version": 2,
-  "routes": [{ "src": "/(.*)", "dest": "dist/index.js" }],
+  "routes": [    { "handle": "filesystem" },
+    {
+      "src": "/(.*)",
+      "dest": "dist/index.js"
+    }
+  ],
   "crons": [
     {
       "path": "/cron/matching",
