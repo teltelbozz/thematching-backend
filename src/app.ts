@@ -13,7 +13,6 @@ import matchCron from "./cron/matchCron";
 import cronRouter from './routes/cron';
 import matchingResultRouter from './routes/matchingResult'; //マッチング結果を返す
 import path from "path";
-import express from "express";
 
 
 // ★ 追加
