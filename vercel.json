@@ -3,10 +3,7 @@
   "routes": [
         { "src": "^/matching-demo\\.html$", "dest": "/dist/public/matching-demo.html" },
         { "handle": "filesystem" },
-    {
-      "src": "/(.*)",
-      "dest": "dist/index.js"
-    }
+        { "src": "/(.*)","dest": "dist/index.js"}
   ],
   "crons": [
     {
