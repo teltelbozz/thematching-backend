@@ -6,17 +6,32 @@
     <title>TheMatching Demo</title>
     <style>
       body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+      h1 { margin: 0 0 12px; }
       .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
       input, select, button { padding: 8px 10px; font-size: 14px; }
+      button { cursor: pointer; }
       table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-      th, td { border-bottom: 1px solid #eee; padding: 10px; text-align: left; }
-      th { background: #fafafa; }
-      .pill { padding: 2px 8px; border-radius: 999px; font-size: 12px; background: #f2f2f2; }
+      th, td { border-bottom: 1px solid #eee; padding: 10px; text-align: left; vertical-align: top; }
+      th { background: #fafafa; position: sticky; top: 0; }
+      .pill { padding: 2px 8px; border-radius: 999px; font-size: 12px; background: #f2f2f2; display: inline-block; }
+      .pill.female { background: #ffe8f1; }
+      .pill.male { background: #e8f2ff; }
       .muted { color: #777; font-size: 12px; }
+      .status { margin-left: 6px; }
+      .status.ok { color: #067d17; }
+      .status.err { color: #b00020; }
+      .toolbar { margin: 8px 0 16px; }
+      code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
     </style>
   </head>
   <body>
     <h1>TheMatching Demo</h1>
+
+    <div class="toolbar muted">
+      API確認: <code>/api/health</code> →
+      <button id="health">Check</button>
+      <span class="status" id="healthStatus"></span>
+    </div>
 
     <div class="row">
       <label>Admin Token:</label>
@@ -30,7 +45,7 @@
       <label>Search:</label>
       <input id="q" placeholder="nickname / LINE_xxx / user_id" />
       <button id="load">Load Users</button>
-      <span class="muted" id="status"></span>
+      <span class="status" id="status"></span>
     </div>
 
     <table>
@@ -42,6 +57,7 @@
           <th>Age</th>
           <th>LINE</th>
           <th>Verified</th>
+          <th>Created</th>
         </tr>
       </thead>
       <tbody id="tbody"></tbody>
@@ -54,6 +70,30 @@
         return String(s).replace(/[&<>"']/g, (c) => ({
           "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
         }[c]));
+      }
+
+      function setStatus(el, text, kind) {
+        el.textContent = text;
+        el.classList.remove("ok", "err");
+        if (kind) el.classList.add(kind);
+      }
+
+      async function checkHealth() {
+        const el = $("healthStatus");
+        setStatus(el, "checking...", null);
+
+        try {
+          const res = await fetch("/api/health");
+          if (!res.ok) {
+            const t = await res.text();
+            setStatus(el, `NG (${res.status}) ${t}`, "err");
+            return;
+          }
+          const data = await res.json();
+          setStatus(el, `OK env=${data.env || "-"}`, "ok");
+        } catch (e) {
+          setStatus(el, `NG ${e?.message || e}`, "err");
+        }
       }
 
       async function loadUsers() {
@@ -71,38 +111,73 @@
         if (q) url.searchParams.set("q", q);
         url.searchParams.set("limit", "300");
 
-        $("status").textContent = "loading...";
+        setStatus($("status"), "loading...", null);
         $("tbody").innerHTML = "";
 
-        const res = await fetch(url.toString(), {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        let res;
+        try {
+          res = await fetch(url.toString(), {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        } catch (e) {
+          setStatus($("status"), "network error", "err");
+          alert(e?.message || String(e));
+          return;
+        }
 
         if (!res.ok) {
           const t = await res.text();
-          $("status").textContent = `error: ${res.status}`;
+
+          // よくある詰まりどころを丁寧に表示
+          if (res.status === 401) {
+            setStatus($("status"), "unauthorized (token?)", "err");
+            alert(
+              "401 Unauthorized\n\nAdmin Token が間違っているか、サーバ側が ADMIN/CRON 認証を要求しています。\n" +
+              "curl で通った token をそのまま貼ってください。\n\n" + t
+            );
+            return;
+          }
+
+          setStatus($("status"), `error: ${res.status}`, "err");
           alert(t);
           return;
         }
 
         const data = await res.json();
-        $("status").textContent = `loaded: ${data.count}`;
+        setStatus($("status"), `loaded: ${data.count}`, "ok");
 
-        const rows = data.users.map(u => `
-          <tr>
-            <td>${escapeHtml(u.user_id)}</td>
-            <td>${escapeHtml(u.nickname || "")}</td>
-            <td><span class="pill">${escapeHtml(u.gender)}</span></td>
-            <td>${escapeHtml(u.age)}</td>
-            <td class="muted">${escapeHtml(u.line_user_id)}</td>
-            <td>${u.verified_age ? "✅" : "—"}</td>
-          </tr>
-        `).join("");
+        const rows = (data.users || []).map((u) => {
+          const genderClass = u.gender === "female" ? "female" : (u.gender === "male" ? "male" : "");
+          const age = (u.age === 0 || u.age === "0") ? "—" : u.age; // デモで age=0 を見やすく
+          const nick = u.nickname ? u.nickname : "(no nickname)";
+          const created = u.created_at ? new Date(u.created_at).toLocaleString("ja-JP") : "—";
 
-        $("tbody").innerHTML = rows;
+          return `
+            <tr>
+              <td>${escapeHtml(u.user_id)}</td>
+              <td>${escapeHtml(nick)}</td>
+              <td><span class="pill ${genderClass}">${escapeHtml(u.gender)}</span></td>
+              <td>${escapeHtml(age)}</td>
+              <td class="muted">${escapeHtml(u.line_user_id || "")}</td>
+              <td>${u.verified_age ? "✅" : "—"}</td>
+              <td class="muted">${escapeHtml(created)}</td>
+            </tr>
+          `;
+        }).join("");
+
+        $("tbody").innerHTML = rows || `<tr><td colspan="7" class="muted">no users</td></tr>`;
       }
 
+      // click
       $("load").addEventListener("click", loadUsers);
+      $("health").addEventListener("click", checkHealth);
+
+      // Enter で実行（token / q）
+      $("token").addEventListener("keydown", (e) => { if (e.key === "Enter") loadUsers(); });
+      $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") loadUsers(); });
+
+      // 初回: health 自動チェック（デプロイ直後の切り分け用）
+      checkHealth();
     </script>
   </body>
 </html>

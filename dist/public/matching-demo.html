@@ -1,124 +1,183 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <title>マッチング結果デモ</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>TheMatching Demo</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+      h1 { margin: 0 0 12px; }
+      .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      input, select, button { padding: 8px 10px; font-size: 14px; }
+      button { cursor: pointer; }
+      table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+      th, td { border-bottom: 1px solid #eee; padding: 10px; text-align: left; vertical-align: top; }
+      th { background: #fafafa; position: sticky; top: 0; }
+      .pill { padding: 2px 8px; border-radius: 999px; font-size: 12px; background: #f2f2f2; display: inline-block; }
+      .pill.female { background: #ffe8f1; }
+      .pill.male { background: #e8f2ff; }
+      .muted { color: #777; font-size: 12px; }
+      .status { margin-left: 6px; }
+      .status.ok { color: #067d17; }
+      .status.err { color: #b00020; }
+      .toolbar { margin: 8px 0 16px; }
+      code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
+    </style>
+  </head>
+  <body>
+    <h1>TheMatching Demo</h1>
 
-  <!-- TailwindCSS CDN（スタンドアロンのページなので OK） -->
-  <script src="https://cdn.tailwindcss.com"></script>
-
-  <style>
-    body {
-      background: #f5f6fa;
-    }
-  </style>
-</head>
-
-<body class="p-4">
-  <div class="max-w-3xl mx-auto">
-
-    <h1 class="text-3xl font-bold mb-6 text-center">
-      マッチング結果デモ
-    </h1>
-
-    <!-- SlotDt 入力 -->
-    <div class="mb-6 bg-white p-4 rounded shadow">
-      <label class="block text-gray-700 font-semibold mb-2">
-        Slot Datetime（例：2025-12-05T19:00:00+09:00）
-      </label>
-      <input id="slotDtInput"
-             type="text"
-             class="border rounded w-full px-3 py-2"
-             value="2025-12-05T19:00:00+09:00" />
-
-      <button onclick="loadResults()"
-              class="bg-blue-600 text-white px-4 py-2 rounded mt-3 hover:bg-blue-700">
-        読み込む
-      </button>
+    <div class="toolbar muted">
+      API確認: <code>/api/health</code> →
+      <button id="health">Check</button>
+      <span class="status" id="healthStatus"></span>
     </div>
 
-    <!-- 結果 -->
-    <div id="resultArea"></div>
+    <div class="row">
+      <label>Admin Token:</label>
+      <input id="token" type="password" placeholder="thematching-cron-2025-01 など" size="28" />
+      <label>Gender:</label>
+      <select id="gender">
+        <option value="">all</option>
+        <option value="female">female</option>
+        <option value="male">male</option>
+      </select>
+      <label>Search:</label>
+      <input id="q" placeholder="nickname / LINE_xxx / user_id" />
+      <button id="load">Load Users</button>
+      <span class="status" id="status"></span>
+    </div>
 
-  </div>
+    <table>
+      <thead>
+        <tr>
+          <th>User ID</th>
+          <th>Nickname</th>
+          <th>Gender</th>
+          <th>Age</th>
+          <th>LINE</th>
+          <th>Verified</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
 
-  <script>
-    async function loadResults() {
-      const slotDt = document.getElementById("slotDtInput").value;
-      const encoded = encodeURIComponent(slotDt);
+    <script>
+      const $ = (id) => document.getElementById(id);
 
-      const url = `https://thematching-backend.vercel.app/admin/matching-results?slotDt=${encoded}`;
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, (c) => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+        }[c]));
+      }
 
-      const area = document.getElementById("resultArea");
-      area.innerHTML = `<p class="text-gray-600">読み込み中...</p>`;
+      function setStatus(el, text, kind) {
+        el.textContent = text;
+        el.classList.remove("ok", "err");
+        if (kind) el.classList.add(kind);
+      }
 
-      try {
-        const res = await fetch(url);
-        const data = await res.json();
+      async function checkHealth() {
+        const el = $("healthStatus");
+        setStatus(el, "checking...", null);
 
-        if (!data.ok) {
-          area.innerHTML = `<p class="text-red-600">エラー: ${data.error}</p>`;
+        try {
+          const res = await fetch("/api/health");
+          if (!res.ok) {
+            const t = await res.text();
+            setStatus(el, `NG (${res.status}) ${t}`, "err");
+            return;
+          }
+          const data = await res.json();
+          setStatus(el, `OK env=${data.env || "-"}`, "ok");
+        } catch (e) {
+          setStatus(el, `NG ${e?.message || e}`, "err");
+        }
+      }
+
+      async function loadUsers() {
+        const token = $("token").value.trim();
+        if (!token) {
+          alert("Admin Token を入力してください");
           return;
         }
 
-        const groups = data.groups;
+        const gender = $("gender").value;
+        const q = $("q").value.trim();
 
-        area.innerHTML = `
-          <h2 class="text-xl font-bold mb-4">
-            マッチング結果（${groups.length}組）
-          </h2>
-        `;
+        const url = new URL("/admin/users", window.location.origin);
+        if (gender) url.searchParams.set("gender", gender);
+        if (q) url.searchParams.set("q", q);
+        url.searchParams.set("limit", "300");
 
-        groups.forEach((g, idx) => {
-          const html = `
-            <div class="bg-white p-4 rounded shadow mb-4">
-              <h3 class="text-lg font-bold mb-2">
-                グループ ${idx + 1}
-              </h3>
+        setStatus($("status"), "loading...", null);
+        $("tbody").innerHTML = "";
 
-              <p class="text-gray-700 mb-2">
-                <span class="font-semibold">Token:</span> ${g.token}
-              </p>
+        let res;
+        try {
+          res = await fetch(url.toString(), {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        } catch (e) {
+          setStatus($("status"), "network error", "err");
+          alert(e?.message || String(e));
+          return;
+        }
 
-              <div class="grid grid-cols-2 gap-4">
+        if (!res.ok) {
+          const t = await res.text();
 
-                <!-- 女性 -->
-                <div>
-                  <h4 class="text-pink-600 font-bold mb-1">女性</h4>
-                  ${g.female.map(f => `
-                    <div class="border rounded p-2 mb-2">
-                      <p>👤 <span class="font-semibold">${f.nickname}</span></p>
-                      <p>年齢: ${f.age}</p>
-                      <p>ID: ${f.user_id}</p>
-                    </div>
-                  `).join("")}
-                </div>
+          // よくある詰まりどころを丁寧に表示
+          if (res.status === 401) {
+            setStatus($("status"), "unauthorized (token?)", "err");
+            alert(
+              "401 Unauthorized\n\nAdmin Token が間違っているか、サーバ側が ADMIN/CRON 認証を要求しています。\n" +
+              "curl で通った token をそのまま貼ってください。\n\n" + t
+            );
+            return;
+          }
 
-                <!-- 男性 -->
-                <div>
-                  <h4 class="text-blue-600 font-bold mb-1">男性</h4>
-                  ${g.male.map(m => `
-                    <div class="border rounded p-2 mb-2">
-                      <p>👤 <span class="font-semibold">${m.nickname}</span></p>
-                      <p>年齢: ${m.age}</p>
-                      <p>ID: ${m.user_id}</p>
-                    </div>
-                  `).join("")}
-                </div>
+          setStatus($("status"), `error: ${res.status}`, "err");
+          alert(t);
+          return;
+        }
 
-              </div>
-            </div>
+        const data = await res.json();
+        setStatus($("status"), `loaded: ${data.count}`, "ok");
+
+        const rows = (data.users || []).map((u) => {
+          const genderClass = u.gender === "female" ? "female" : (u.gender === "male" ? "male" : "");
+          const age = (u.age === 0 || u.age === "0") ? "—" : u.age; // デモで age=0 を見やすく
+          const nick = u.nickname ? u.nickname : "(no nickname)";
+          const created = u.created_at ? new Date(u.created_at).toLocaleString("ja-JP") : "—";
+
+          return `
+            <tr>
+              <td>${escapeHtml(u.user_id)}</td>
+              <td>${escapeHtml(nick)}</td>
+              <td><span class="pill ${genderClass}">${escapeHtml(u.gender)}</span></td>
+              <td>${escapeHtml(age)}</td>
+              <td class="muted">${escapeHtml(u.line_user_id || "")}</td>
+              <td>${u.verified_age ? "✅" : "—"}</td>
+              <td class="muted">${escapeHtml(created)}</td>
+            </tr>
           `;
+        }).join("");
 
-          area.innerHTML += html;
-        });
-
-      } catch (e) {
-        area.innerHTML = `<p class="text-red-600">通信エラー</p>`;
+        $("tbody").innerHTML = rows || `<tr><td colspan="7" class="muted">no users</td></tr>`;
       }
-    }
-  </script>
 
-</body>
+      // click
+      $("load").addEventListener("click", loadUsers);
+      $("health").addEventListener("click", checkHealth);
+
+      // Enter で実行（token / q）
+      $("token").addEventListener("keydown", (e) => { if (e.key === "Enter") loadUsers(); });
+      $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") loadUsers(); });
+
+      // 初回: health 自動チェック（デプロイ直後の切り分け用）
+      checkHealth();
+    </script>
+  </body>
 </html>
