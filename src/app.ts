@@ -12,6 +12,7 @@ import groupsRouter from "./routes/groups";
 import cronRouter from './routes/cron';
 import matchingResultRouter from './routes/matchingResult'; //マッチング結果を返す
 import path from "path";
+import adminUsersRouter from "./routes/adminUsers";
 
 
 // ★ 追加
@@ -55,5 +56,6 @@ app.use('/cron', cronRouter);
 app.use('/admin', matchingResultRouter); //マッチング結果を返す
 // dist/public を参照
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/admin", adminUsersRouter); // 管理画面向けユーザ一覧
 
 export default app;
