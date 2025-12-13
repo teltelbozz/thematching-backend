@@ -9,7 +9,6 @@ import matchPrefsRoutes from './routes/matchPrefs';
 import setupRoutes from './routes/setup';
 import requireAuth from './middleware/requireAuth'; // 既存
 import groupsRouter from "./routes/groups";
-import matchCron from "./cron/matchCron";
 import cronRouter from './routes/cron';
 import matchingResultRouter from './routes/matchingResult'; //マッチング結果を返す
 import path from "path";
