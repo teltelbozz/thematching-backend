@@ -22,6 +22,13 @@
       .status.err { color: #b00020; }
       .toolbar { margin: 8px 0 16px; }
       code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
+      hr { border: 0; border-top: 1px solid #eee; margin: 18px 0; }
+      .sectionTitle { margin: 18px 0 6px; font-size: 16px; }
+      .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+      @media (max-width: 980px) { .grid2 { grid-template-columns: 1fr; } }
+      .nowrap { white-space: nowrap; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+      .small { font-size: 12px; }
     </style>
   </head>
   <body>
@@ -36,32 +43,80 @@
     <div class="row">
       <label>Admin Token:</label>
       <input id="token" type="password" placeholder="thematching-cron-2025-01 など" size="28" />
-      <label>Gender:</label>
-      <select id="gender">
-        <option value="">all</option>
-        <option value="female">female</option>
-        <option value="male">male</option>
-      </select>
-      <label>Search:</label>
-      <input id="q" placeholder="nickname / LINE_xxx / user_id" />
-      <button id="load">Load Users</button>
-      <span class="status" id="status"></span>
+      <span class="muted">※ /admin/* は Bearer Token 必須</span>
     </div>
 
-    <table>
-      <thead>
-        <tr>
-          <th>User ID</th>
-          <th>Nickname</th>
-          <th>Gender</th>
-          <th>Age</th>
-          <th>LINE</th>
-          <th>Verified</th>
-          <th>Created</th>
-        </tr>
-      </thead>
-      <tbody id="tbody"></tbody>
-    </table>
+    <hr />
+
+    <div class="grid2">
+      <!-- 左: Users -->
+      <div>
+        <div class="sectionTitle">Users</div>
+        <div class="row">
+          <label>Gender:</label>
+          <select id="gender">
+            <option value="">all</option>
+            <option value="female">female</option>
+            <option value="male">male</option>
+          </select>
+          <label>Search:</label>
+          <input id="q" placeholder="nickname / LINE_xxx / user_id" />
+          <button id="loadUsers">Load Users</button>
+          <span class="status" id="usersStatus"></span>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>User ID</th>
+              <th>Nickname</th>
+              <th>Gender</th>
+              <th>Age</th>
+              <th>LINE</th>
+              <th>Verified</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody id="usersTbody"></tbody>
+        </table>
+      </div>
+
+      <!-- 右: Matching Results -->
+      <div>
+        <div class="sectionTitle">Matching Results</div>
+        <div class="row">
+          <label class="nowrap">slotDt:</label>
+          <input
+            id="slotDt"
+            size="30"
+            placeholder="2025-12-05T19:00:00+09:00"
+            value="2025-12-05T19:00:00+09:00"
+          />
+          <button id="loadResults">Load Results</button>
+          <span class="status" id="resultsStatus"></span>
+        </div>
+        <div class="muted small">
+          例: <span class="mono">2025-12-05T19:00:00+09:00</span>
+          （URLに載せるときは <span class="mono">+</span> が <span class="mono">%2B</span> になるので注意）
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Group</th>
+              <th>Slot</th>
+              <th>Location</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Token</th>
+              <th>Female</th>
+              <th>Male</th>
+            </tr>
+          </thead>
+          <tbody id="resultsTbody"></tbody>
+        </table>
+      </div>
+    </div>
 
     <script>
       const $ = (id) => document.getElementById(id);
@@ -76,6 +131,15 @@
         el.textContent = text;
         el.classList.remove("ok", "err");
         if (kind) el.classList.add(kind);
+      }
+
+      function getTokenOrAlert() {
+        const token = $("token").value.trim();
+        if (!token) {
+          alert("Admin Token を入力してください");
+          return null;
+        }
+        return token;
       }
 
       async function checkHealth() {
@@ -97,11 +161,8 @@
       }
 
       async function loadUsers() {
-        const token = $("token").value.trim();
-        if (!token) {
-          alert("Admin Token を入力してください");
-          return;
-        }
+        const token = getTokenOrAlert();
+        if (!token) return;
 
         const gender = $("gender").value;
         const q = $("q").value.trim();
@@ -111,8 +172,8 @@
         if (q) url.searchParams.set("q", q);
         url.searchParams.set("limit", "300");
 
-        setStatus($("status"), "loading...", null);
-        $("tbody").innerHTML = "";
+        setStatus($("usersStatus"), "loading...", null);
+        $("usersTbody").innerHTML = "";
 
         let res;
         try {
@@ -120,35 +181,29 @@
             headers: { Authorization: `Bearer ${token}` },
           });
         } catch (e) {
-          setStatus($("status"), "network error", "err");
+          setStatus($("usersStatus"), "network error", "err");
           alert(e?.message || String(e));
           return;
         }
 
         if (!res.ok) {
           const t = await res.text();
-
-          // よくある詰まりどころを丁寧に表示
           if (res.status === 401) {
-            setStatus($("status"), "unauthorized (token?)", "err");
-            alert(
-              "401 Unauthorized\n\nAdmin Token が間違っているか、サーバ側が ADMIN/CRON 認証を要求しています。\n" +
-              "curl で通った token をそのまま貼ってください。\n\n" + t
-            );
+            setStatus($("usersStatus"), "unauthorized (token?)", "err");
+            alert("401 Unauthorized\n\nAdmin Token が違う可能性があります。\n\n" + t);
             return;
           }
-
-          setStatus($("status"), `error: ${res.status}`, "err");
+          setStatus($("usersStatus"), `error: ${res.status}`, "err");
           alert(t);
           return;
         }
 
         const data = await res.json();
-        setStatus($("status"), `loaded: ${data.count}`, "ok");
+        setStatus($("usersStatus"), `loaded: ${data.count}`, "ok");
 
         const rows = (data.users || []).map((u) => {
           const genderClass = u.gender === "female" ? "female" : (u.gender === "male" ? "male" : "");
-          const age = (u.age === 0 || u.age === "0") ? "—" : u.age; // デモで age=0 を見やすく
+          const age = (u.age === 0 || u.age === "0") ? "—" : u.age;
           const nick = u.nickname ? u.nickname : "(no nickname)";
           const created = u.created_at ? new Date(u.created_at).toLocaleString("ja-JP") : "—";
 
@@ -165,18 +220,99 @@
           `;
         }).join("");
 
-        $("tbody").innerHTML = rows || `<tr><td colspan="7" class="muted">no users</td></tr>`;
+        $("usersTbody").innerHTML = rows || `<tr><td colspan="7" class="muted">no users</td></tr>`;
       }
 
-      // click
-      $("load").addEventListener("click", loadUsers);
-      $("health").addEventListener("click", checkHealth);
+      function renderPerson(p) {
+        const genderClass = p.gender === "female" ? "female" : (p.gender === "male" ? "male" : "");
+        const nick = p.nickname ? p.nickname : "(no nickname)";
+        return `
+          <div>
+            <span class="pill ${genderClass}">${escapeHtml(p.gender)}</span>
+            <b>${escapeHtml(nick)}</b>
+            <span class="muted">(${escapeHtml(p.age)}歳 / id=${escapeHtml(p.user_id)})</span><br/>
+            <span class="muted mono">${escapeHtml(p.line_user_id || "")}</span>
+          </div>
+        `;
+      }
 
-      // Enter で実行（token / q）
+      async function loadMatchingResults() {
+        const token = getTokenOrAlert();
+        if (!token) return;
+
+        const slotDt = $("slotDt").value.trim();
+        if (!slotDt) {
+          alert("slotDt を入力してください（例: 2025-12-05T19:00:00+09:00）");
+          return;
+        }
+
+        const url = new URL("/admin/matching-results", window.location.origin);
+        url.searchParams.set("slotDt", slotDt);
+
+        setStatus($("resultsStatus"), "loading...", null);
+        $("resultsTbody").innerHTML = "";
+
+        let res;
+        try {
+          res = await fetch(url.toString(), {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        } catch (e) {
+          setStatus($("resultsStatus"), "network error", "err");
+          alert(e?.message || String(e));
+          return;
+        }
+
+        if (!res.ok) {
+          const t = await res.text();
+          if (res.status === 401) {
+            setStatus($("resultsStatus"), "unauthorized (token?)", "err");
+            alert("401 Unauthorized\n\nAdmin Token が違う可能性があります。\n\n" + t);
+            return;
+          }
+          setStatus($("resultsStatus"), `error: ${res.status}`, "err");
+          alert(t);
+          return;
+        }
+
+        const data = await res.json();
+        setStatus($("resultsStatus"), `loaded: ${data.count}`, "ok");
+
+        const rows = (data.groups || []).map((g) => {
+          const slot = g.slotDt ? new Date(g.slotDt).toLocaleString("ja-JP") : "—";
+          const tokenShort = g.token ? g.token : "—";
+
+          const femaleHtml = (g.female || []).map(renderPerson).join("<hr style='border:0;border-top:1px solid #eee;margin:6px 0'/>");
+          const maleHtml = (g.male || []).map(renderPerson).join("<hr style='border:0;border-top:1px solid #eee;margin:6px 0'/>");
+
+          return `
+            <tr>
+              <td class="mono">${escapeHtml(g.groupId)}</td>
+              <td class="muted">${escapeHtml(slot)}</td>
+              <td>${escapeHtml(g.location || "")}</td>
+              <td>${escapeHtml(g.typeMode || "")}</td>
+              <td>${escapeHtml(g.status || "")}</td>
+              <td class="mono">${escapeHtml(tokenShort)}</td>
+              <td>${femaleHtml || "<span class='muted'>—</span>"}</td>
+              <td>${maleHtml || "<span class='muted'>—</span>"}</td>
+            </tr>
+          `;
+        }).join("");
+
+        $("resultsTbody").innerHTML = rows || `<tr><td colspan="8" class="muted">no matching results</td></tr>`;
+      }
+
+      // events
+      $("health").addEventListener("click", checkHealth);
+      $("loadUsers").addEventListener("click", loadUsers);
+      $("loadResults").addEventListener("click", loadMatchingResults);
+
+      // Enterで実行
       $("token").addEventListener("keydown", (e) => { if (e.key === "Enter") loadUsers(); });
       $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") loadUsers(); });
+      $("slotDt").addEventListener("keydown", (e) => { if (e.key === "Enter") loadMatchingResults(); });
 
-      // 初回: health 自動チェック（デプロイ直後の切り分け用）
+      // 初回チェック
       checkHealth();
     </script>
   </body>
