@@ -54,8 +54,9 @@ app.use('/api/setup', requireAuth, setupRoutes);
 app.use("/groups", groupsRouter);//参加URL生成
 app.use('/cron', cronRouter);
 app.use('/admin', matchingResultRouter); //マッチング結果を返す
+app.use("/admin", adminUsersRouter); // 管理画面向けユーザ一覧
 // dist/public を参照
 app.use(express.static(path.join(__dirname, "public")));
-app.use("/admin", adminUsersRouter); // 管理画面向けユーザ一覧
+
 
 export default app;
