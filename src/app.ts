@@ -43,7 +43,7 @@ app.use(
 );
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, env: config.env });
+  res.json({ ok: true, env: config.env, build: process.env.VERCEL_GIT_COMMIT_SHA });
 });
 
 app.use('/api/auth', authRoutes);

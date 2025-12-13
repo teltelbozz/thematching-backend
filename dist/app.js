@@ -37,7 +37,7 @@ app.use((0, cors_1.default)({
     allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, env: config_1.default.env });
+    res.json({ ok: true, env: config_1.default.env, build: process.env.VERCEL_GIT_COMMIT_SHA });
 });
 app.use('/api/auth', auth_1.default);
 app.use('/api/profile', profile_1.default);
@@ -47,7 +47,7 @@ app.use('/api/setup', requireAuth_1.default, setup_1.default);
 app.use("/groups", groups_1.default); //参加URL生成
 app.use('/cron', cron_1.default);
 app.use('/admin', matchingResult_1.default); //マッチング結果を返す
+app.use("/admin", adminUsers_1.default); // 管理画面向けユーザ一覧
 // dist/public を参照
 app.use(express_1.default.static(path_1.default.join(__dirname, "public")));
-app.use("/admin", adminUsers_1.default); // 管理画面向けユーザ一覧
 exports.default = app;

@@ -1,17 +1,14 @@
 {
   "version": 2,
+  "builds": [
+    { "src": "dist/index.js", "use": "@vercel/node" }
+  ],
   "routes": [
-        { "handle": "filesystem" },
-        { "src": "/(.*)","dest": "dist/index.js"}
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "dist/index.js" }
   ],
   "crons": [
-    {
-      "path": "/cron/matching",
-      "schedule": "0 11 * * 4"
-    },
-    {
-      "path": "/cron/matching",
-      "schedule": "0 11 * * 5"
-    }
+    { "path": "/cron/matching", "schedule": "0 11 * * 4" },
+    { "path": "/cron/matching", "schedule": "0 11 * * 5" }
   ]
 }
