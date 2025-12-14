@@ -4,6 +4,8 @@ import type { MatchCandidate } from "./engine";
 
 /**
  * computeMatchesForSlot() の結果を書き込む + status更新（B案：slot単位）
+ * - user_setup_slots の該当 slotDt を processed にする（activeのみ）
+ * - user_setup(status) は更新しない（setup_status 運用しない方針）
  */
 export async function saveMatchesForSlot(
   db: Pool,
@@ -18,7 +20,7 @@ export async function saveMatchesForSlot(
     await client.query("BEGIN");
 
     // ------------------------------------------------------
-    // 1. matched_groups と matched_group_members を保存（現状維持）
+    // 1) matched_groups / members / history を保存（現状維持）
     // ------------------------------------------------------
     if (matched.length === 0) {
       console.log(`[saveMatchesForSlot] No matched groups for ${slotDt}`);
@@ -35,7 +37,7 @@ export async function saveMatchesForSlot(
           location,
           typeMode,
         ]);
-        const groupId = grpRes.rows[0].id as number;
+        const groupId = Number(grpRes.rows[0].id);
 
         // matched_group_members INSERT
         const insertMember = `
@@ -43,11 +45,10 @@ export async function saveMatchesForSlot(
           VALUES ($1, $2, $3)
         `;
 
-        // 女性2名
+        // female
         await client.query(insertMember, [groupId, group.female[0], "female"]);
         await client.query(insertMember, [groupId, group.female[1], "female"]);
-
-        // 男性2名
+        // male
         await client.query(insertMember, [groupId, group.male[0], "male"]);
         await client.query(insertMember, [groupId, group.male[1], "male"]);
 
@@ -59,9 +60,9 @@ export async function saveMatchesForSlot(
         `;
         for (const f of group.female) {
           for (const m of group.male) {
-            const fem = Math.min(f, m);
-            const mal = Math.max(f, m);
-            await client.query(insertHistory, [fem, mal, slotDt]);
+            const a = Math.min(f, m);
+            const b = Math.max(f, m);
+            await client.query(insertHistory, [a, b, slotDt]);
           }
         }
       }
@@ -72,7 +73,7 @@ export async function saveMatchesForSlot(
     }
 
     // ------------------------------------------------------
-    // 2. 🔥 B案：この slotDt の user_setup_slots だけ processed にする
+    // 2) slot単位で processed にする（この slotDt の active だけ）
     // ------------------------------------------------------
     const updateSlotStatusSql = `
       UPDATE user_setup_slots
@@ -83,31 +84,6 @@ export async function saveMatchesForSlot(
     const slotRes = await client.query(updateSlotStatusSql, [slotDt]);
     console.log(
       `[saveMatchesForSlot] Marked ${slotRes.rowCount} setup_slots as processed for slot ${slotDt}`
-    );
-
-    // ------------------------------------------------------
-    // 3. 親 user_setup は「active slot が残っていない」ものだけ processed
-    //    （複数slot登録でも、全部終わるまで親はactiveのまま）
-    // ------------------------------------------------------
-    const updateSetupStatusSql = `
-      UPDATE user_setup s
-      SET status = 'processed'
-      WHERE s.status = 'active'
-        AND EXISTS (
-          SELECT 1
-          FROM user_setup_slots sl
-          WHERE sl.user_setup_id = s.id
-        )
-        AND NOT EXISTS (
-          SELECT 1
-          FROM user_setup_slots sl
-          WHERE sl.user_setup_id = s.id
-            AND sl.status = 'active'
-        )
-    `;
-    const setupRes = await client.query(updateSetupStatusSql);
-    console.log(
-      `[saveMatchesForSlot] Marked ${setupRes.rowCount} setups as processed (no active slots remain)`
     );
 
     await client.query("COMMIT");

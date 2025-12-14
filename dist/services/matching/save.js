@@ -3,13 +3,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.saveMatchesForSlot = saveMatchesForSlot;
 /**
  * computeMatchesForSlot() の結果を書き込む + status更新（B案：slot単位）
+ * - user_setup_slots の該当 slotDt を processed にする（activeのみ）
+ * - user_setup(status) は更新しない（setup_status 運用しない方針）
  */
 async function saveMatchesForSlot(db, slotDt, location, typeMode, matched) {
     const client = await db.connect();
     try {
         await client.query("BEGIN");
         // ------------------------------------------------------
-        // 1. matched_groups と matched_group_members を保存（現状維持）
+        // 1) matched_groups / members / history を保存（現状維持）
         // ------------------------------------------------------
         if (matched.length === 0) {
             console.log(`[saveMatchesForSlot] No matched groups for ${slotDt}`);
@@ -27,16 +29,16 @@ async function saveMatchesForSlot(db, slotDt, location, typeMode, matched) {
                     location,
                     typeMode,
                 ]);
-                const groupId = grpRes.rows[0].id;
+                const groupId = Number(grpRes.rows[0].id);
                 // matched_group_members INSERT
                 const insertMember = `
           INSERT INTO matched_group_members (group_id, user_id, gender)
           VALUES ($1, $2, $3)
         `;
-                // 女性2名
+                // female
                 await client.query(insertMember, [groupId, group.female[0], "female"]);
                 await client.query(insertMember, [groupId, group.female[1], "female"]);
-                // 男性2名
+                // male
                 await client.query(insertMember, [groupId, group.male[0], "male"]);
                 await client.query(insertMember, [groupId, group.male[1], "male"]);
                 // match_history（案4: 男女ペアのみ）
@@ -47,16 +49,16 @@ async function saveMatchesForSlot(db, slotDt, location, typeMode, matched) {
         `;
                 for (const f of group.female) {
                     for (const m of group.male) {
-                        const fem = Math.min(f, m);
-                        const mal = Math.max(f, m);
-                        await client.query(insertHistory, [fem, mal, slotDt]);
+                        const a = Math.min(f, m);
+                        const b = Math.max(f, m);
+                        await client.query(insertHistory, [a, b, slotDt]);
                     }
                 }
             }
             console.log(`[saveMatchesForSlot] Saved ${matched.length} groups for slot ${slotDt}`);
         }
         // ------------------------------------------------------
-        // 2. 🔥 B案：この slotDt の user_setup_slots だけ processed にする
+        // 2) slot単位で processed にする（この slotDt の active だけ）
         // ------------------------------------------------------
         const updateSlotStatusSql = `
       UPDATE user_setup_slots
@@ -66,28 +68,6 @@ async function saveMatchesForSlot(db, slotDt, location, typeMode, matched) {
     `;
         const slotRes = await client.query(updateSlotStatusSql, [slotDt]);
         console.log(`[saveMatchesForSlot] Marked ${slotRes.rowCount} setup_slots as processed for slot ${slotDt}`);
-        // ------------------------------------------------------
-        // 3. 親 user_setup は「active slot が残っていない」ものだけ processed
-        //    （複数slot登録でも、全部終わるまで親はactiveのまま）
-        // ------------------------------------------------------
-        const updateSetupStatusSql = `
-      UPDATE user_setup s
-      SET status = 'processed'
-      WHERE s.status = 'active'
-        AND EXISTS (
-          SELECT 1
-          FROM user_setup_slots sl
-          WHERE sl.user_setup_id = s.id
-        )
-        AND NOT EXISTS (
-          SELECT 1
-          FROM user_setup_slots sl
-          WHERE sl.user_setup_id = s.id
-            AND sl.status = 'active'
-        )
-    `;
-        const setupRes = await client.query(updateSetupStatusSql);
-        console.log(`[saveMatchesForSlot] Marked ${setupRes.rowCount} setups as processed (no active slots remain)`);
         await client.query("COMMIT");
     }
     catch (err) {

@@ -11,6 +11,20 @@ function getJstDateKey(offsetDays = 1) {
     const dd = String(target.getDate()).padStart(2, "0");
     return `${yyyy}-${mm}-${dd}`; // 例: "2025-12-05"
 }
+// slotDt 表示用（Dateパースが怪しい時に落ちないようにするだけ）
+function safeJstLabel(slotDt) {
+    try {
+        // DBによって "YYYY-MM-DD HH:mm:ss+00" 形式などが来ることがある
+        // その場合 new Date() が環境依存になり得るので、失敗しても文字列で返す
+        const d = new Date(slotDt);
+        if (Number.isNaN(d.getTime()))
+            return slotDt;
+        return d.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+    }
+    catch {
+        return slotDt;
+    }
+}
 /**
  * メイン関数
  *  - 翌日分の slot_dt を抽出
@@ -38,16 +52,29 @@ async function executeMatchCron(pool) {
     const history = await (0, matching_1.getHistoryEdges)();
     console.log(`[cron] history edges = ${history.size}`);
     for (const slotDt of slotList) {
-        const jstLabel = new Date(slotDt).toLocaleString("ja-JP", {
-            timeZone: "Asia/Tokyo",
-        });
-        console.log(`\n[cron] ===== slot ${slotDt} (JST=${jstLabel}) =====`);
+        console.log(`\n[cron] ===== slot ${slotDt} (JST=${safeJstLabel(slotDt)}) =====`);
         try {
-            // ② エントリユーザ取得
+            // ② エントリユーザ取得（B案: active slot / active setup のみ返る想定）
             const entries = await (0, matching_1.getEntriesForSlot)(slotDt);
             console.log(`[cron] entries count = ${entries.length}`);
+            // ★改善：entries=0 の slot も “処理済み” に倒す（重くならないため）
+            //  - getSlotsForDate が active slot を返している以上、ここで entries=0 が起きることはあり得る
+            //    (例: parent setup が processed にされた / profiles欠損 / 途中データ不整合 etc)
+            //  - slotだけ残り続けると cron 対象に残り続けるので、slot単位で processed に倒す
             if (entries.length === 0) {
-                console.log(`[cron] no entries for slot=${slotDt}`);
+                console.log(`[cron] no entries for slot=${slotDt} -> mark slot processed`);
+                const client = await pool.connect();
+                try {
+                    await client.query(`
+            UPDATE user_setup_slots
+            SET status = 'processed'
+            WHERE slot_dt = $1
+              AND status = 'active'
+            `, [slotDt]);
+                }
+                finally {
+                    client.release();
+                }
                 results.push({
                     slotDt,
                     matchedCount: 0,
@@ -61,6 +88,8 @@ async function executeMatchCron(pool) {
             const types = Array.from(new Set(entries.map((e) => e.type_mode)));
             if (locations.length !== 1 || types.length !== 1) {
                 console.warn(`[cron] inconsistent location/type_mode for slot=${slotDt}`, { locations, types });
+                // 不整合なslotも “処理済み” に倒したいかは議論余地があるので、
+                // ここではデグレ回避のため「現状通り：処理せず結果にerrorだけ」。
                 results.push({
                     slotDt,
                     matchedCount: 0,
@@ -75,7 +104,7 @@ async function executeMatchCron(pool) {
             // ④ マッチング実行（年齢 + history のみ）
             const { matched, unmatched } = (0, matching_1.computeMatchesForSlot)(entries, history);
             console.log(`[cron] matched groups=${matched.length}, unmatched users=${unmatched.length}`);
-            // ⑤ DB 保存
+            // ⑤ DB 保存（B案: slot単位 processed もここで実施される）
             await (0, matching_1.saveMatchesForSlot)(pool, slotDt, location, typeMode, matched);
             // ⑥ token 付与
             await (0, matching_1.assignTokensForSlot)(pool, slotDt, location, typeMode);
