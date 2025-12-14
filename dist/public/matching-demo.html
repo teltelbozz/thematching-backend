@@ -74,6 +74,8 @@
     }
     .pill.female { background: #ffe8f1; }
     .pill.male { background: #e8f2ff; }
+    .pill.active { background: #e8fff0; }
+    .pill.processed { background: #f2f2f2; }
 
     .muted { color: #777; font-size: 12px; }
     .status.ok { color: #067d17; }
@@ -132,9 +134,8 @@
       margin-top: 14px;
       font-weight: 700;
     }
-    .mini-table th, .mini-table td {
-      padding: 8px;
-    }
+    .mini-table th, .mini-table td { padding: 8px; }
+
     .btn-ghost {
       background: #fff;
       border: 1px solid #ddd;
@@ -151,6 +152,32 @@
       border: 1px solid #f0b0b0;
       color: #b00020;
       border-radius: 8px;
+    }
+
+    /* ===== Results extra sections ===== */
+    .section-title {
+      margin-top: 14px;
+      font-weight: 700;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+    .card {
+      margin-top: 10px;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #fff;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .mini {
+      font-size: 12px;
+      color: #555;
     }
   </style>
 </head>
@@ -226,6 +253,12 @@
     <span id="resultsStatus" class="status muted"></span>
   </div>
 
+  <!-- Matched groups table -->
+  <div class="section-title">
+    <span>Matched Groups</span>
+    <span class="muted" id="groupsMeta"></span>
+  </div>
+
   <table>
     <thead>
       <tr>
@@ -241,6 +274,14 @@
     </thead>
     <tbody id="resultsTbody"></tbody>
   </table>
+
+  <!-- Unmatched users -->
+  <div class="section-title">
+    <span>Unmatched Users</span>
+    <span class="muted" id="unmatchedMeta"></span>
+  </div>
+
+  <div id="unmatchedWrap" class="grid"></div>
 </div>
 
 <!-- ===== Drawer UI ===== -->
@@ -362,13 +403,16 @@
     const genderClass = u.gender === "female" ? "female" : (u.gender === "male" ? "male" : "");
     const age = (u.age === 0 || u.age === "0" || u.age == null) ? "—" : u.age;
 
+    // ★ slots API の status は「user_setup_slots.status（slot_status）」が返る想定
+    const pillClass = (st) => (st === "processed" ? "processed" : (st === "active" ? "active" : ""));
+
     const slotRows = slots.map(x => `
       <tr>
         <td class="mono">${esc(x.slot_jst || "")}</td>
         <td class="muted">${esc(x.week_key || "")}</td>
         <td>${esc(x.type_mode || "")}</td>
         <td>${esc(x.location || "")}</td>
-        <td><span class="pill">${esc(x.status || "")}</span></td>
+        <td><span class="pill ${pillClass(x.status)}">${esc(x.status || "")}</span></td>
       </tr>
     `).join("");
 
@@ -401,7 +445,7 @@
             <th style="text-align:left; border-bottom:1px solid #eee;">week_key</th>
             <th style="text-align:left; border-bottom:1px solid #eee;">type</th>
             <th style="text-align:left; border-bottom:1px solid #eee;">location</th>
-            <th style="text-align:left; border-bottom:1px solid #eee;">status</th>
+            <th style="text-align:left; border-bottom:1px solid #eee;">slot_status</th>
           </tr>
         </thead>
         <tbody>
@@ -510,6 +554,9 @@
 
     setStatus($("resultsStatus"), "loading...", null);
     $("resultsTbody").innerHTML = "";
+    $("unmatchedWrap").innerHTML = "";
+    $("groupsMeta").textContent = "";
+    $("unmatchedMeta").textContent = "";
 
     let res;
     try {
@@ -529,11 +576,15 @@
     const data = await res.json();
     setStatus($("resultsStatus"), `loaded ${data.count}`, "ok");
 
-    const render = p => `
+    // ---- Matched Groups
+    $("groupsMeta").textContent = `${(data.count ?? 0)} groups`;
+
+    const renderPerson = p => `
       <div style="margin-bottom:6px;">
-        <span class="pill ${p.gender}">${p.gender}</span>
+        <span class="pill ${esc(p.gender)}">${esc(p.gender)}</span>
         <b>${esc(p.nickname)}</b>
         <span class="muted">(${esc(p.age)})</span>
+        <div class="mini mono">${esc(p.user_id)} / ${esc(p.line_user_id || "")}</div>
       </div>
     `;
 
@@ -545,10 +596,45 @@
         <td>${esc(g.typeMode)}</td>
         <td>${esc(g.status)}</td>
         <td class="mono">${esc(g.token || "")}</td>
-        <td>${(g.female || []).map(render).join("")}</td>
-        <td>${(g.male || []).map(render).join("")}</td>
+        <td>${(g.female || []).map(renderPerson).join("")}</td>
+        <td>${(g.male || []).map(renderPerson).join("")}</td>
       </tr>
     `).join("") || `<tr><td colspan="8" class="muted">no results</td></tr>`;
+
+    // ---- Unmatched Users
+    const unmatched = data.unmatchedUsers || [];
+    const unmatchedCount = (data.unmatchedCount != null) ? data.unmatchedCount : unmatched.length;
+    $("unmatchedMeta").textContent = `${unmatchedCount} users`;
+
+    if (!unmatched.length) {
+      $("unmatchedWrap").innerHTML = `<div class="muted">no unmatched users</div>`;
+      return;
+    }
+
+    $("unmatchedWrap").innerHTML = unmatched.map(u => {
+      const genderClass = (u.gender === "female" ? "female" : (u.gender === "male" ? "male" : ""));
+      const age = (u.age === 0 || u.age === "0" || u.age == null) ? "—" : u.age;
+      return `
+        <div class="card" title="click to open user detail" data-user-id="${esc(u.user_id)}">
+          <div class="row" style="margin:0; gap:8px;">
+            <span class="pill ${genderClass}">${esc(u.gender || "-")}</span>
+            <b>#${esc(u.user_id)}</b>
+            <span class="muted">${esc(u.nickname || "(no nickname)")}</span>
+            <span class="muted">age ${esc(age)}</span>
+          </div>
+          <div class="mini mono" style="margin-top:6px;">${esc(u.line_user_id || "")}</div>
+          <div class="mini" style="margin-top:6px;">verified: ${u.verified_age ? "✅" : "—"}</div>
+        </div>
+      `;
+    }).join("");
+
+    // unmatched card click -> drawer
+    document.querySelectorAll('#unmatchedWrap [data-user-id]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.getAttribute('data-user-id');
+        if (id) loadUserDetail(id);
+      });
+    });
   };
 </script>
 </body>
