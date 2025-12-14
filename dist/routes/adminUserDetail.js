@@ -4,7 +4,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const router = (0, express_1.Router)();
 function requireAdmin(req, res) {
-    const secret = process.env.ADMIN_SECRET || process.env.CRON_SECRET; // 一覧と同じ仕様
+    const secret = process.env.ADMIN_SECRET || process.env.CRON_SECRET;
     const auth = req.header("authorization") || "";
     if (!secret || auth !== `Bearer ${secret}`) {
         console.warn("[admin/user-detail] unauthorized");
@@ -71,8 +71,9 @@ router.get("/users/:userId", async (req, res) => {
 });
 /**
  * GET /admin/users/:userId/slots?limit=200
- * - user_setup に紐づく slot 一覧（status も含む）
- * - slot_dt は timestamptz のまま返しつつ、slot_jst も返す
+ * - ✅ スロット単位の処理ステータスを返す（user_setup_slots.status）
+ * - 既存の slots[].status を "slot_status" に差し替える（デグレ回避）
+ * - 親の status は setup_status として返す（必要なら）
  */
 router.get("/users/:userId/slots", async (req, res) => {
     if (!requireAdmin(req, res))
@@ -83,7 +84,19 @@ router.get("/users/:userId/slots", async (req, res) => {
         return res.status(400).json({ error: "invalid userId" });
     }
     const limit = Math.min(Number(req.query.limit || 200), 500);
+    // 任意: status フィルタ（slot_statusで絞る）
+    const status = req.query.status || undefined;
+    if (status && status !== "active" && status !== "processed") {
+        return res.status(400).json({ error: "invalid status filter" });
+    }
     try {
+        const where = ["s.user_id = $1"];
+        const params = [userId];
+        let i = 2;
+        if (status) {
+            where.push(`sl.status = $${i++}`);
+            params.push(status);
+        }
         const sql = `
       SELECT
         s.id            AS setup_id,
@@ -92,18 +105,22 @@ router.get("/users/:userId/slots", async (req, res) => {
         s.location,
         s.cost_pref,
         s.venue_pref,
-        s.status,
+        s.status        AS setup_status,   -- 親（参考用）
         s.submitted_at,
+
         sl.id           AS slot_id,
         sl.slot_dt,
+        sl.status       AS slot_status,    -- ✅ これが欲しいやつ
+
         (sl.slot_dt AT TIME ZONE 'Asia/Tokyo') AS slot_jst
       FROM user_setup s
       JOIN user_setup_slots sl ON sl.user_setup_id = s.id
-      WHERE s.user_id = $1
+      WHERE ${where.join(" AND ")}
       ORDER BY sl.slot_dt DESC, sl.id DESC
-      LIMIT $2
+      LIMIT $${i}
     `;
-        const { rows } = await db.query(sql, [userId, limit]);
+        params.push(limit);
+        const { rows } = await db.query(sql, params);
         return res.json({
             ok: true,
             userId,
@@ -115,10 +132,13 @@ router.get("/users/:userId/slots", async (req, res) => {
                 location: r.location,
                 cost_pref: r.cost_pref,
                 venue_pref: r.venue_pref,
-                status: r.status,
+                // ✅ 既存互換：slots[].status は slot_status を返す（ここが最重要）
+                status: r.slot_status,
+                // 参考: 親の状態も返す（UIで必要になったら使える）
+                setup_status: r.setup_status,
                 submitted_at: r.submitted_at,
                 slot_id: Number(r.slot_id),
-                slot_dt: r.slot_dt, // ISO で返る（timestamptz）
+                slot_dt: r.slot_dt, // ISO (timestamptz)
                 slot_jst: r.slot_jst, // "YYYY-MM-DD HH:MM:SS" (JST)
             })),
         });
