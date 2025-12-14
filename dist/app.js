@@ -18,6 +18,7 @@ const cron_1 = __importDefault(require("./routes/cron"));
 const matchingResult_1 = __importDefault(require("./routes/matchingResult")); //マッチング結果を返す
 const path_1 = __importDefault(require("path"));
 const adminUsers_1 = __importDefault(require("./routes/adminUsers"));
+const adminUserDetail_1 = __importDefault(require("./routes/adminUserDetail"));
 // ★ 追加
 const db_1 = require("./db");
 const auth_1 = __importDefault(require("./routes/auth"));
@@ -48,6 +49,7 @@ app.use("/groups", groups_1.default); //参加URL生成
 app.use('/cron', cron_1.default);
 app.use('/admin', matchingResult_1.default); //マッチング結果を返す
 app.use("/admin", adminUsers_1.default); // 管理画面向けユーザ一覧
+app.use("/admin", adminUserDetail_1.default); // 管理画面向けユーザ詳細
 // dist/public を参照
 app.use(express_1.default.static(path_1.default.join(__dirname, "public")));
 exports.default = app;
