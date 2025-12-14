@@ -2,14 +2,14 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.saveMatchesForSlot = saveMatchesForSlot;
 /**
- * computeMatchesForSlot() の結果を書き込む + 応募ステータス更新(processed)
+ * computeMatchesForSlot() の結果を書き込む + status更新（B案：slot単位）
  */
 async function saveMatchesForSlot(db, slotDt, location, typeMode, matched) {
     const client = await db.connect();
     try {
         await client.query("BEGIN");
         // ------------------------------------------------------
-        // 1. matched_groups と matched_group_members を保存
+        // 1. matched_groups と matched_group_members を保存（現状維持）
         // ------------------------------------------------------
         if (matched.length === 0) {
             console.log(`[saveMatchesForSlot] No matched groups for ${slotDt}`);
@@ -56,21 +56,38 @@ async function saveMatchesForSlot(db, slotDt, location, typeMode, matched) {
             console.log(`[saveMatchesForSlot] Saved ${matched.length} groups for slot ${slotDt}`);
         }
         // ------------------------------------------------------
-        // 2. 🔥 応募(user_setup)ステータスを processed に更新（A案）
+        // 2. 🔥 B案：この slotDt の user_setup_slots だけ processed にする
         // ------------------------------------------------------
-        const updateStatusSql = `
-      UPDATE user_setup
+        const updateSlotStatusSql = `
+      UPDATE user_setup_slots
       SET status = 'processed'
-      WHERE id IN (
-        SELECT s.id
-        FROM user_setup s
-        JOIN user_setup_slots sl
-          ON sl.user_setup_id = s.id
-        WHERE sl.slot_dt = $1
-      );
+      WHERE slot_dt = $1
+        AND status = 'active'
     `;
-        const statusRes = await client.query(updateStatusSql, [slotDt]);
-        console.log(`[saveMatchesForSlot] Marked ${statusRes.rowCount} setups as processed for slot ${slotDt}`);
+        const slotRes = await client.query(updateSlotStatusSql, [slotDt]);
+        console.log(`[saveMatchesForSlot] Marked ${slotRes.rowCount} setup_slots as processed for slot ${slotDt}`);
+        // ------------------------------------------------------
+        // 3. 親 user_setup は「active slot が残っていない」ものだけ processed
+        //    （複数slot登録でも、全部終わるまで親はactiveのまま）
+        // ------------------------------------------------------
+        const updateSetupStatusSql = `
+      UPDATE user_setup s
+      SET status = 'processed'
+      WHERE s.status = 'active'
+        AND EXISTS (
+          SELECT 1
+          FROM user_setup_slots sl
+          WHERE sl.user_setup_id = s.id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM user_setup_slots sl
+          WHERE sl.user_setup_id = s.id
+            AND sl.status = 'active'
+        )
+    `;
+        const setupRes = await client.query(updateSetupStatusSql);
+        console.log(`[saveMatchesForSlot] Marked ${setupRes.rowCount} setups as processed (no active slots remain)`);
         await client.query("COMMIT");
     }
     catch (err) {

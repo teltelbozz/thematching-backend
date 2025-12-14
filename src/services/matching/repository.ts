@@ -4,24 +4,32 @@ import type { SlotEntry } from "./engine";
 
 /**
  * 指定日（YYYY-MM-DD）に対応する slot_dt 一覧を取得
+ * ★ B案：
+ *   - user_setup_slots.status = 'active' の slot_dt だけ対象
+ *   - processed slot は cron 対象外になる（重くならない）
  */
 export async function getSlotsForDate(date: string): Promise<string[]> {
   const { rows } = await pool.query(
     `
-    SELECT DISTINCT slot_dt
-    FROM user_setup_slots
-    WHERE slot_dt::date = $1::date
-    ORDER BY slot_dt
+    SELECT DISTINCT sl.slot_dt
+    FROM user_setup_slots sl
+    JOIN user_setup s ON s.id = sl.user_setup_id
+    WHERE sl.slot_dt::date = $1::date
+      AND sl.status = 'active'
+      AND s.status = 'active'
+    ORDER BY sl.slot_dt
     `,
     [date]
   );
+
   return rows.map((r: { slot_dt: string }) => r.slot_dt);
 }
 
 /**
  * ある slot_dt にエントリしているユーザ一覧を取得
- * ★ 改善点：
- *   - user_setup.status = 'active' を条件に追加（processed の応募は無視）
+ * ★ B案：
+ *   - user_setup_slots.status = 'active' を条件に追加（slot単位で処理済みは無視）
+ *   - user_setup.status = 'active' も維持（親がprocessedなら除外）
  */
 export async function getEntriesForSlot(slotDt: string): Promise<SlotEntry[]> {
   const { rows } = await pool.query(
@@ -37,7 +45,8 @@ export async function getEntriesForSlot(slotDt: string): Promise<SlotEntry[]> {
       JOIN users u             ON u.id = s.user_id
       JOIN user_profiles p     ON p.user_id = u.id
     WHERE sl.slot_dt = $1
-      AND s.status = 'active'   -- ★ 追加：processed を無視する
+      AND sl.status = 'active'   -- ★ 追加：slot単位でprocessedを無視
+      AND s.status = 'active'    -- ★ 既存維持：親がprocessedなら無視
     ORDER BY u.id
     `,
     [slotDt]
