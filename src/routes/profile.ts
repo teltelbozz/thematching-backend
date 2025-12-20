@@ -44,6 +44,36 @@ async function resolveUserIdFromClaims(claims: any, db: Pool): Promise<number | 
   return null;
 }
 
+async function getCurrentTerms(db: Pool) {
+  const r = await db.query(
+    `
+    SELECT id, version, published_at
+    FROM terms_versions
+    WHERE is_active = true
+    ORDER BY published_at DESC, id DESC
+    LIMIT 1
+    `
+  );
+  return r.rows[0] ?? null;
+}
+async function getLatestAcceptance(db: Pool, userId: number) {
+  const r = await db.query(
+    `
+    SELECT
+      tv.id AS terms_version_id,
+      tv.version,
+      uta.accepted_at
+    FROM user_terms_acceptances uta
+    JOIN terms_versions tv ON tv.id = uta.terms_version_id
+    WHERE uta.user_id = $1
+    ORDER BY uta.accepted_at DESC
+    LIMIT 1
+    `,
+    [userId]
+  );
+  return r.rows[0] ?? null;
+}
+
 // ========== GET /api/profile ==========
 router.get('/', async (req, res) => {
   try {
@@ -100,6 +130,25 @@ router.put('/', async (req, res) => {
 
     const uid = await resolveUserIdFromClaims(claims, db);
     if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
+
+    // ★ 追加：最新規約の未同意ならプロフィール更新させない（登録前に必ず同意）
+    try {
+      const cur = await getCurrentTerms(db);
+      if (cur) {
+        const acc = await getLatestAcceptance(db, uid);
+        const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
+        if (needs) {
+          return res.status(412).json({
+            error: "terms_not_accepted",
+            currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
+          });
+        }
+      }
+    } catch (e) {
+      // ここで落とすと登録不能になるので、terms導入直後の移行期は通す運用も可能。
+      // ただし「規約同意を強制したい」場合は return 500 にしてもOK。
+      console.warn("[profile:put] terms check failed; allowing update", e);
+    }
 
     const {
       nickname, age, gender, occupation,
