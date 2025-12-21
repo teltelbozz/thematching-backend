@@ -3,7 +3,10 @@ import { Router } from 'express';
 import type { Pool } from 'pg';
 import { readBearer, verifyAccess } from '../auth/tokenService';
 
+
 const router = Router();
+console.log("[boot] terms router loaded"); // ファイル先頭あたり
+router.get("/status", (_req, res) => res.json({ ok: true, ping: "status-route-alive" }));
 
 function normalizeClaims(v: any): any {
   if (v && typeof v === 'object' && 'payload' in v) return (v as any).payload;
@@ -114,11 +117,13 @@ router.get('/status', async (req, res) => {
       [userId, terms.id],
     );
 
+    const accepted = (r.rowCount ?? 0) > 0;
+
     return res.json({
       ok: true,
-      accepted: r.rowCount > 0,
+      accepted,
       currentVersion: terms.version,
-      acceptedVersion: r.rowCount > 0 ? terms.version : null,
+      acceptedVersion: accepted ? terms.version : null,
     });
   } catch (e: any) {
     console.error('[terms/status]', e);
@@ -187,5 +192,7 @@ router.post('/accept', async (req, res) => {
     return res.status(500).json({ error: e?.message || 'server_error' });
   }
 });
+
+
 
 export default router;
