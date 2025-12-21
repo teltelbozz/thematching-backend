@@ -3,10 +3,14 @@ import { Router } from 'express';
 import type { Pool } from 'pg';
 import { readBearer, verifyAccess } from '../auth/tokenService';
 
-
 const router = Router();
-console.log("[boot] terms router loaded"); // ファイル先頭あたり
-router.get("/status", (_req, res) => res.json({ ok: true, ping: "status-route-alive" }));
+console.log('[boot] terms router loaded');
+
+/**
+ * （任意）疎通確認用：/api/terms/ping
+ * 以前 /status に置いていた ping は、同名ルート競合で本処理を潰すので禁止
+ */
+router.get('/ping', (_req, res) => res.json({ ok: true, ping: 'terms-route-alive' }));
 
 function normalizeClaims(v: any): any {
   if (v && typeof v === 'object' && 'payload' in v) return (v as any).payload;
@@ -32,6 +36,7 @@ async function resolveUserIdFromClaims(claims: any, db: Pool): Promise<number | 
 
   if (typeof raw === 'string' && raw.trim()) {
     const sub = raw.trim();
+
     const r1 = await db.query<{ id: number }>(
       'SELECT id FROM users WHERE line_user_id = $1 LIMIT 1',
       [sub],
@@ -44,6 +49,7 @@ async function resolveUserIdFromClaims(claims: any, db: Pool): Promise<number | 
     );
     return r2.rows[0]?.id ?? null;
   }
+
   return null;
 }
 
@@ -104,7 +110,12 @@ router.get('/status', async (req, res) => {
     const terms = await getCurrentTerms(db);
     if (!terms) {
       // 規約が無いなら “同意不要” 扱い（運用上ラク）
-      return res.json({ ok: true, accepted: true });
+      return res.json({
+        ok: true,
+        accepted: true,
+        currentVersion: null,
+        acceptedVersion: null,
+      });
     }
 
     const r = await db.query(
@@ -149,23 +160,24 @@ router.post('/accept', async (req, res) => {
 
     const { termsId, version, userAgent } = req.body || {};
 
-    let terms: any = null;
+    let terms: { id: number; version: string } | null = null;
 
     if (termsId && Number.isFinite(Number(termsId))) {
-      const r = await db.query(
+      const r = await db.query<{ id: number; version: string }>(
         `SELECT id, version FROM terms_documents WHERE id = $1 LIMIT 1`,
         [Number(termsId)],
       );
       terms = r.rows[0] ?? null;
     } else if (version && typeof version === 'string') {
-      const r = await db.query(
+      const r = await db.query<{ id: number; version: string }>(
         `SELECT id, version FROM terms_documents WHERE version = $1 LIMIT 1`,
         [version],
       );
       terms = r.rows[0] ?? null;
     } else {
       // 指定が無ければ current を同意対象とする
-      terms = await getCurrentTerms(db);
+      const cur = await getCurrentTerms(db);
+      if (cur) terms = { id: cur.id, version: cur.version };
     }
 
     if (!terms) return res.status(404).json({ error: 'terms_not_found' });
@@ -192,7 +204,5 @@ router.post('/accept', async (req, res) => {
     return res.status(500).json({ error: e?.message || 'server_error' });
   }
 });
-
-
 
 export default router;
