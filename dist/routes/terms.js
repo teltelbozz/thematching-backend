@@ -4,8 +4,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const tokenService_1 = require("../auth/tokenService");
 const router = (0, express_1.Router)();
-console.log("[boot] terms router loaded"); // ファイル先頭あたり
-router.get("/status", (_req, res) => res.json({ ok: true, ping: "status-route-alive" }));
+console.log('[boot] terms router loaded');
+/**
+ * （任意）疎通確認用：/api/terms/ping
+ * 以前 /status に置いていた ping は、同名ルート競合で本処理を潰すので禁止
+ */
+router.get('/ping', (_req, res) => res.json({ ok: true, ping: 'terms-route-alive' }));
 function normalizeClaims(v) {
     if (v && typeof v === 'object' && 'payload' in v)
         return v.payload;
@@ -91,7 +95,12 @@ router.get('/status', async (req, res) => {
         const terms = await getCurrentTerms(db);
         if (!terms) {
             // 規約が無いなら “同意不要” 扱い（運用上ラク）
-            return res.json({ ok: true, accepted: true });
+            return res.json({
+                ok: true,
+                accepted: true,
+                currentVersion: null,
+                acceptedVersion: null,
+            });
         }
         const r = await db.query(`
       SELECT 1
@@ -139,7 +148,9 @@ router.post('/accept', async (req, res) => {
         }
         else {
             // 指定が無ければ current を同意対象とする
-            terms = await getCurrentTerms(db);
+            const cur = await getCurrentTerms(db);
+            if (cur)
+                terms = { id: cur.id, version: cur.version };
         }
         if (!terms)
             return res.status(404).json({ error: 'terms_not_found' });
