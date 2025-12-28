@@ -8,5 +8,5 @@ if (!connectionString) {
 
 export const pool = new Pool({
   connectionString,
-  ssl: { rejectUnauthorized: false }, // Neon等のマネージドPG向け
+  ssl: { rejectUnauthorized: false },
 });

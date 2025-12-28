@@ -12,7 +12,6 @@ type SetupDTO = {
   cost_pref: 'men_pay_all' | 'split_even' | 'follow_partner';
 };
 
-// JSTの週キー（簡易）
 function toWeekKeyJST(d: Date): string {
   const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
   const start = new Date(Date.UTC(jst.getUTCFullYear(), 0, 1));
@@ -65,7 +64,6 @@ function validatePayload(p: any): asserts p is SetupDTO {
   }
 }
 
-// GET /api/setup : 最新の保存内容を返す
 router.get('/', async (req: Request, res: Response) => {
   const userId = (req as any).userId;
   if (!userId) return res.status(401).json({ error: 'unauthorized' });
@@ -106,7 +104,6 @@ router.get('/', async (req: Request, res: Response) => {
   return res.json({ setup: resp });
 });
 
-// PUT /api/setup : 保存（1回の保存でヘッダ+スロットを丸ごと置き換え）
 router.put('/', async (req: Request, res: Response) => {
   const userId = (req as any).userId;
   if (!userId) return res.status(401).json({ error: 'unauthorized' });

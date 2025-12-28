@@ -6,28 +6,18 @@ import { readBearer, verifyAccess } from '../auth/tokenService';
 const router = Router();
 console.log('[boot] terms router loaded');
 
-/**
- * （任意）疎通確認用：/api/terms/ping
- * 以前 /status に置いていた ping は、同名ルート競合で本処理を潰すので禁止
- */
 router.get('/ping', (_req, res) => res.json({ ok: true, ping: 'terms-route-alive' }));
 
 function normalizeClaims(v: any): any {
   if (v && typeof v === 'object' && 'payload' in v) return (v as any).payload;
   return v;
 }
-
 function normalizeUidNumber(v: unknown): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
   return null;
 }
 
-/**
- * claims.uid が:
- *  - 数値 … users.id として扱う
- *  - 文字列（LINE sub = "U..."）… users.line_user_id から id 解決（なければ発行）
- */
 async function resolveUserIdFromClaims(claims: any, db: Pool): Promise<number | null> {
   const raw = claims?.uid;
 
@@ -59,9 +49,6 @@ function getDb(req: any): Pool {
   return db;
 }
 
-/**
- * 現在有効な規約（latest effective_at <= now）を返す
- */
 async function getCurrentTerms(db: Pool) {
   const r = await db.query(
     `
@@ -75,9 +62,6 @@ async function getCurrentTerms(db: Pool) {
   return r.rows[0] ?? null;
 }
 
-/**
- * GET /api/terms/current
- */
 router.get('/current', async (req, res) => {
   try {
     const db = getDb(req);
@@ -91,10 +75,6 @@ router.get('/current', async (req, res) => {
   }
 });
 
-/**
- * GET /api/terms/status
- * - 現在termsに同意済みか
- */
 router.get('/status', async (req, res) => {
   try {
     const token = readBearer(req);
@@ -109,7 +89,6 @@ router.get('/status', async (req, res) => {
 
     const terms = await getCurrentTerms(db);
     if (!terms) {
-      // 規約が無いなら “同意不要” 扱い（運用上ラク）
       return res.json({
         ok: true,
         accepted: true,
@@ -142,10 +121,6 @@ router.get('/status', async (req, res) => {
   }
 });
 
-/**
- * POST /api/terms/accept
- * body: { termsId?: number, version?: string, userAgent?: string }
- */
 router.post('/accept', async (req, res) => {
   try {
     const token = readBearer(req);
@@ -175,7 +150,6 @@ router.post('/accept', async (req, res) => {
       );
       terms = r.rows[0] ?? null;
     } else {
-      // 指定が無ければ current を同意対象とする
       const cur = await getCurrentTerms(db);
       if (cur) terms = { id: cur.id, version: cur.version };
     }

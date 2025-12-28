@@ -5,15 +5,6 @@ import { readBearer, verifyAccess } from "../auth/tokenService";
 
 const router = Router();
 
-/**
- * GET /api/me
- * - userId: ユーザーID
- * - hasProfile: プロフィール登録済みか
- * - gender: 'male' | 'female' | null
- * - needsTermsAcceptance: 最新規約への同意が必要か（A案：誘導用）
- * - currentTermsVersion: 現在有効な規約バージョン（存在しない場合 null）
- * - acceptedTermsVersion: 同意済みの規約バージョン（未同意なら null）
- */
 router.get("/", async (req, res) => {
   try {
     const token = readBearer(req);
@@ -30,12 +21,12 @@ router.get("/", async (req, res) => {
       return res.status(500).json({ error: "server_error" });
     }
 
-    // user_profilesにidカラムがない（主キーはuser_id）
     const q = `
       SELECT
         u.id AS user_id,
         EXISTS (SELECT 1 FROM user_profiles p2 WHERE p2.user_id = u.id) AS has_profile,
-        p.gender AS gender
+        p.gender AS gender,
+        p.verified_age AS verified_age
       FROM users u
       LEFT JOIN user_profiles p ON p.user_id = u.id
       WHERE u.id = $1 OR u.line_user_id = $2
@@ -45,11 +36,9 @@ router.get("/", async (req, res) => {
     const row = rows[0];
     if (!row?.user_id) return res.status(401).json({ error: "unauthenticated" });
 
-    const gender =
-      row.gender === "male" || row.gender === "female" ? row.gender : null;
+    const gender = row.gender === "male" || row.gender === "female" ? row.gender : null;
 
-    // ===== 追加：規約（current）と同意状況 =====
-    // current（effective_at <= now の最新）
+    // terms current
     const currentTermsRes = await db.query(
       `
       SELECT id, version
@@ -82,13 +71,26 @@ router.get("/", async (req, res) => {
       needsTermsAcceptance = !accepted;
     }
 
+    // ✅ KYC: verified_age が false なら未完了扱い（profileが無い時は “登録が先”）
+    const hasProfile = !!row.has_profile;
+    const verifiedAge =
+      typeof row.verified_age === "boolean" ? (row.verified_age as boolean) : null;
+
+    const needsKyc = hasProfile && verifiedAge === false;
+
     return res.json({
       userId: row.user_id as number,
-      hasProfile: !!row.has_profile,
+      hasProfile,
       gender,
+
+      // terms
       needsTermsAcceptance,
       currentTermsVersion,
       acceptedTermsVersion,
+
+      // kyc
+      verifiedAge,
+      needsKyc,
     });
   } catch (e: any) {
     console.error("[me:get]", e?.message || e);

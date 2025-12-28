@@ -3,7 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.requireAuth = requireAuth;
 exports.requireAuthUserId = requireAuthUserId;
 const tokenService_1 = require("../auth/tokenService");
-/** Authorization: Bearer xxx または sid クッキーからトークンを取得 */
 function extractToken(req) {
     const t = (0, tokenService_1.readBearer)(req);
     if (t && t.toLowerCase() !== 'null' && t.toLowerCase() !== 'undefined')
@@ -24,7 +23,6 @@ async function requireAuth(req, res, next) {
         const token = extractToken(req);
         if (!token)
             return res.status(401).json({ error: 'unauthenticated' });
-        // ★ 発行側と同一の検証ロジック・鍵（JWT_ACCESS_SECRET, HS256）で検証
         const verified = await (0, tokenService_1.verifyAccess)(token);
         const claims = verified?.payload ?? verified;
         const uid = claims?.uid || claims?.userId || claims?.sub;

@@ -3,7 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const db_1 = require("../db");
 const router = (0, express_1.Router)();
-// JSTの週キー（簡易）
 function toWeekKeyJST(d) {
     const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
     const start = new Date(Date.UTC(jst.getUTCFullYear(), 0, 1));
@@ -61,7 +60,6 @@ function validatePayload(p) {
         throw err;
     }
 }
-// GET /api/setup : 最新の保存内容を返す
 router.get('/', async (req, res) => {
     const userId = req.userId;
     if (!userId)
@@ -93,7 +91,6 @@ router.get('/', async (req, res) => {
     };
     return res.json({ setup: resp });
 });
-// PUT /api/setup : 保存（1回の保存でヘッダ+スロットを丸ごと置き換え）
 router.put('/', async (req, res) => {
     const userId = req.userId;
     if (!userId)

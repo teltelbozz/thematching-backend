@@ -9,5 +9,5 @@ if (!connectionString) {
 }
 exports.pool = new pg_1.Pool({
     connectionString,
-    ssl: { rejectUnauthorized: false }, // Neon等のマネージドPG向け
+    ssl: { rejectUnauthorized: false },
 });

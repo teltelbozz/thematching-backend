@@ -2,7 +2,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { readBearer, verifyAccess } from '../auth/tokenService';
 
-/** Authorization: Bearer xxx または sid クッキーからトークンを取得 */
 function extractToken(req: Request): string | undefined {
   const t = readBearer(req);
   if (t && t.toLowerCase() !== 'null' && t.toLowerCase() !== 'undefined') return t;
@@ -23,7 +22,6 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     const token = extractToken(req);
     if (!token) return res.status(401).json({ error: 'unauthenticated' });
 
-    // ★ 発行側と同一の検証ロジック・鍵（JWT_ACCESS_SECRET, HS256）で検証
     const verified = await verifyAccess(token);
     const claims = (verified as any)?.payload ?? verified;
     const uid = claims?.uid || claims?.userId || claims?.sub;

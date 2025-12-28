@@ -15,12 +15,6 @@ function normalizeUidNumber(v: unknown): number | null {
   return null;
 }
 
-/**
- * アクセストークン内 claims の uid が:
- *  - 数値 … そのまま返す
- *  - 文字列（LINEの sub 想定 = "U..."）… users.line_user_id から id を解決
- *    - 見つからなければ INSERT して id を払い出す（フォールバック）
- */
 async function resolveUserIdFromClaims(claims: any, db: Pool): Promise<number | null> {
   const raw = claims?.uid;
 
@@ -44,34 +38,30 @@ async function resolveUserIdFromClaims(claims: any, db: Pool): Promise<number | 
   return null;
 }
 
+// ★ terms_documents に統一
 async function getCurrentTerms(db: Pool) {
   const r = await db.query(
     `
-    SELECT id, version, published_at
-    FROM terms_versions
-    WHERE is_active = true
-    ORDER BY published_at DESC, id DESC
+    SELECT id, version, effective_at
+    FROM terms_documents
+    WHERE effective_at <= now()
+    ORDER BY effective_at DESC, id DESC
     LIMIT 1
     `
   );
   return r.rows[0] ?? null;
 }
-async function getLatestAcceptance(db: Pool, userId: number) {
+async function hasAcceptedCurrentTerms(db: Pool, userId: number, termsId: number) {
   const r = await db.query(
     `
-    SELECT
-      tv.id AS terms_version_id,
-      tv.version,
-      uta.accepted_at
-    FROM user_terms_acceptances uta
-    JOIN terms_versions tv ON tv.id = uta.terms_version_id
-    WHERE uta.user_id = $1
-    ORDER BY uta.accepted_at DESC
+    SELECT 1
+    FROM user_terms_acceptances
+    WHERE user_id = $1 AND terms_id = $2
     LIMIT 1
     `,
-    [userId]
+    [userId, termsId]
   );
-  return r.rows[0] ?? null;
+  return (r.rowCount ?? 0) > 0;
 }
 
 // ========== GET /api/profile ==========
@@ -131,23 +121,20 @@ router.put('/', async (req, res) => {
     const uid = await resolveUserIdFromClaims(claims, db);
     if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
 
-    // ★ 追加：最新規約の未同意ならプロフィール更新させない（登録前に必ず同意）
+    // ★ 最新規約未同意ならプロフィール更新させない
     try {
       const cur = await getCurrentTerms(db);
-      if (cur) {
-        const acc = await getLatestAcceptance(db, uid);
-        const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
-        if (needs) {
+      if (cur?.id) {
+        const ok = await hasAcceptedCurrentTerms(db, uid, Number(cur.id));
+        if (!ok) {
           return res.status(412).json({
-            error: "terms_not_accepted",
-            currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
+            error: 'terms_not_accepted',
+            currentTerms: { id: Number(cur.id), version: cur.version, effective_at: cur.effective_at },
           });
         }
       }
     } catch (e) {
-      // ここで落とすと登録不能になるので、terms導入直後の移行期は通す運用も可能。
-      // ただし「規約同意を強制したい」場合は return 500 にしてもOK。
-      console.warn("[profile:put] terms check failed; allowing update", e);
+      console.warn('[profile:put] terms check failed; allowing update', e);
     }
 
     const {
@@ -157,7 +144,6 @@ router.put('/', async (req, res) => {
       photo_url, photo_masked_url,
     } = req.body || {};
 
-    // 既存の簡易バリデーション + 追加分
     if (nickname != null && typeof nickname !== 'string') return res.status(400).json({ error: 'invalid_nickname' });
     if (age != null && !(Number.isInteger(age) && age >= 18 && age <= 120)) return res.status(400).json({ error: 'invalid_age' });
     if (gender != null && typeof gender !== 'string') return res.status(400).json({ error: 'invalid_gender' });
@@ -174,7 +160,6 @@ router.put('/', async (req, res) => {
     if (photo_url != null && typeof photo_url !== 'string') return res.status(400).json({ error: 'invalid_photo_url' });
     if (photo_masked_url != null && typeof photo_masked_url !== 'string') return res.status(400).json({ error: 'invalid_photo_masked_url' });
 
-    // upsert（拡張カラムを追加）
     await db.query(
       `INSERT INTO user_profiles (
          user_id, nickname, age, gender, occupation,
@@ -220,7 +205,6 @@ router.put('/', async (req, res) => {
       ],
     );
 
-    // 反映後の値を返す（拡張カラムも含めて取得）
     const r = await db.query(
       `SELECT
          u.id, u.line_user_id, u.payment_method_set,
