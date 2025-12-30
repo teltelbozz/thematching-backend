@@ -1,4 +1,4 @@
-//src/app.ts
+// src/app.ts
 import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
@@ -7,29 +7,29 @@ import config from "./config";
 import meRoutes from "./routes/me";
 import matchPrefsRoutes from "./routes/matchPrefs";
 import setupRoutes from "./routes/setup";
-import requireAuth from "./middleware/requireAuth"; // 既存
+import requireAuth from "./middleware/requireAuth";
 import groupsRouter from "./routes/groups";
 import cronRouter from "./routes/cron";
-import matchingResultRouter from "./routes/matchingResult"; //マッチング結果を返す
+import matchingResultRouter from "./routes/matchingResult";
 import path from "path";
 import adminUsersRouter from "./routes/adminUsers";
 import adminUserDetailRouter from "./routes/adminUserDetail";
 
-// ★ 追加
 import { pool } from "./db";
 
 import authRoutes from "./routes/auth";
 import profileRoutes from "./routes/profile";
-
-// ★ 新規
 import termsRoutes from "./routes/terms";
+
+// ★ 追加：Blob routes
+import blobRoutes from "./routes/blob";
 
 const app = express();
 
 // Vercel/プロキシ越しでも Secure Cookie を有効化
 app.set("trust proxy", 1);
 
-// ★ 追加：ここで必ず DB を差し込む（保険）
+// ★ DB
 app.locals.db = pool;
 
 app.use(morgan("combined"));
@@ -41,7 +41,7 @@ app.use(
     origin: config.frontOrigin,
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-cleanup-token"],
   })
 );
 
@@ -52,17 +52,20 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
 
-// ★ 追加（規約：A案＝誘導のみなので認証不要GETあり）
+// 規約
 app.use("/api/terms", termsRoutes);
+
+// ★ 追加：Blob（アップロード/クリーンアップ）
+app.use("/api/blob", requireAuth, blobRoutes);
 
 app.use("/api/me", meRoutes);
 app.use("/api/match-prefs", matchPrefsRoutes);
 app.use("/api/setup", requireAuth, setupRoutes);
-app.use("/groups", groupsRouter); //参加URL生成
+app.use("/groups", groupsRouter);
 app.use("/cron", cronRouter);
-app.use("/admin", matchingResultRouter); //マッチング結果を返す
-app.use("/admin", adminUsersRouter); // 管理画面向けユーザ一覧
-app.use("/admin", adminUserDetailRouter); // 管理画面向けユーザ詳細
+app.use("/admin", matchingResultRouter);
+app.use("/admin", adminUsersRouter);
+app.use("/admin", adminUserDetailRouter);
 
 // dist/public を参照
 app.use(express.static(path.join(__dirname, "public")));
