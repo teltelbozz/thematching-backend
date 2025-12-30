@@ -6,7 +6,8 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "build": "tsc -p tsconfig.json && cp -r public dist/public",
-    "migrate": "psql $DATABASE_URL -f ./migrations/001_schema.sql"
+    "migrate": "psql $DATABASE_URL -f ./migrations/001_schema.sql",
+    "blob:delete:stdin": "tsx scripts/deleteBlobsFromStdin.ts"
   },
   "dependencies": {
     "@vercel/blob": "^2.0.0",
