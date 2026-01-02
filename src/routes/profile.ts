@@ -18,8 +18,8 @@ function normalizeUidNumber(v: unknown): number | null {
 
 /**
  * claims.uid が:
- *  - 数値 … users.id
- *  - 文字列（LINE sub = "U..."）… users.line_user_id から id 解決（なければ発行）
+ *  - 数値 … そのまま users.id
+ *  - 文字列（LINE sub = "U..."）… users.line_user_id から解決（なければ作成）
  */
 async function resolveUserIdFromClaims(claims: any, db: Pool): Promise<number | null> {
   const raw = claims?.uid;
@@ -52,7 +52,7 @@ async function getCurrentTerms(db: Pool) {
     WHERE is_active = true
     ORDER BY published_at DESC, id DESC
     LIMIT 1
-    `
+    `,
   );
   return r.rows[0] ?? null;
 }
@@ -69,19 +69,19 @@ async function getLatestAcceptance(db: Pool, userId: number) {
     ORDER BY uta.accepted_at DESC
     LIMIT 1
     `,
-    [userId]
+    [userId],
   );
   return r.rows[0] ?? null;
 }
 
-/** draft の入力バリデーション（仮保存なので“緩め”：型だけ） */
+/** draft の入力バリデーション（仮保存なので緩め：型だけ見る） */
 function validateDraftBody(b: any) {
-  if (!b || typeof b !== 'object') return { ok: false, error: 'invalid_body' as const };
+  if (!b || typeof b !== 'object') return { ok: false as const, error: 'invalid_body' as const };
 
   const fields = [
-    'nickname','age','gender','occupation',
-    'education','university','hometown','residence',
-    'personality','income','atmosphere',
+    'nickname', 'age', 'gender', 'occupation',
+    'education', 'university', 'hometown', 'residence',
+    'personality', 'income', 'atmosphere',
   ] as const;
 
   for (const k of fields) {
@@ -89,16 +89,17 @@ function validateDraftBody(b: any) {
     if (v == null) continue;
 
     if (k === 'age' || k === 'income') {
-      if (!(Number.isFinite(Number(v)))) return { ok: false, error: `invalid_${k}` as const };
+      if (!Number.isFinite(Number(v))) return { ok: false as const, error: `invalid_${k}` as const };
     } else {
-      if (typeof v !== 'string') return { ok: false, error: `invalid_${k}` as const };
+      if (typeof v !== 'string') return { ok: false as const, error: `invalid_${k}` as const };
     }
   }
-  return { ok: true } as const;
+
+  return { ok: true as const };
 }
 
-/** draft → 確定 payload に整形（確定時は厳しめ） */
-type FinalProfileData = {
+/** draft → 確定用 payload（確定時は nickname 必須） */
+type FinalPayload = {
   nickname: string;
   age: number | null;
   gender: string | null;
@@ -110,15 +111,17 @@ type FinalProfileData = {
   personality: string | null;
   income: number | null;
   atmosphere: string | null;
+  photo_url: string | null;
+  photo_masked_url: string | null;
 };
 
-type NormalizeFinalResult =
-  | { ok: true; data: FinalProfileData }
-  | { ok: false; error: string };
-
-function normalizeFinalPayload(draft: any): NormalizeFinalResult {
+type NormalizeOk = { ok: true; data: FinalPayload };
+type NormalizeNg = { ok: false; error: string };
+function normalizeFinalPayload(draft: any, photoTmpUrl: string | null): NormalizeOk | NormalizeNg {
   const p = draft || {};
-  const nickname = p.nickname ?? null;
+
+  const nicknameRaw = p.nickname;
+  const nickname = (typeof nicknameRaw === 'string' ? nicknameRaw.trim() : '');
 
   const age =
     p.age === undefined || p.age === null || p.age === '' ? null : Number(p.age);
@@ -135,10 +138,8 @@ function normalizeFinalPayload(draft: any): NormalizeFinalResult {
   const personality = p.personality ?? null;
   const atmosphere = p.atmosphere ?? null;
 
-  // nickname 必須（user_profiles.nickname NOT NULL 前提）
-  if (typeof nickname !== 'string' || nickname.trim() === '') {
-    return { ok: false, error: 'nickname_required' };
-  }
+  // ✅ 確定は nickname 必須（user_profiles.nickname NOT NULL）
+  if (!nickname) return { ok: false, error: 'nickname_required' };
 
   if (age != null && !(Number.isInteger(age) && age >= 18 && age <= 120)) {
     return { ok: false, error: 'invalid_age' };
@@ -146,16 +147,17 @@ function normalizeFinalPayload(draft: any): NormalizeFinalResult {
   if (income != null && !(Number.isInteger(income) && income >= 0 && income <= 10_000)) {
     return { ok: false, error: 'invalid_income' };
   }
+  if (gender != null && typeof gender !== 'string') return { ok: false, error: 'invalid_gender' };
 
   const strOk = (v: any) => v == null || typeof v === 'string';
-  if (![gender, occupation, education, university, hometown, residence, personality, atmosphere].every(strOk)) {
+  if (![occupation, education, university, hometown, residence, personality, atmosphere].every(strOk)) {
     return { ok: false, error: 'invalid_string_field' };
   }
 
   return {
     ok: true,
     data: {
-      nickname: nickname.trim(),
+      nickname,
       age,
       gender,
       occupation,
@@ -166,13 +168,14 @@ function normalizeFinalPayload(draft: any): NormalizeFinalResult {
       personality,
       income,
       atmosphere,
+      // ✅ draft フローでは tmp 写真をここで確定として入れる
+      photo_url: photoTmpUrl ?? null,
+      photo_masked_url: null,
     },
   };
 }
 
-/* =========================================================
-   既存：GET /api/profile（確定プロフィール）
-   ========================================================= */
+/** ===== 既存：GET /api/profile（確定プロフィール） ===== */
 router.get('/', async (req, res) => {
   try {
     const token = readBearer(req);
@@ -208,10 +211,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-/* =========================================================
-   既存：PUT /api/profile（確定プロフィール upsert）
-   ※ 既存互換として残す（draftフローでも最終は confirm 推奨）
-   ========================================================= */
+/** ===== 既存：PUT /api/profile（確定プロフィール upsert） ===== */
 router.put('/', async (req, res) => {
   try {
     const token = readBearer(req);
@@ -226,7 +226,7 @@ router.put('/', async (req, res) => {
     const uid = await resolveUserIdFromClaims(claims, db);
     if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
 
-    // terms check（既存どおり）
+    // terms check
     try {
       const cur = await getCurrentTerms(db);
       if (cur) {
@@ -234,13 +234,13 @@ router.put('/', async (req, res) => {
         const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
         if (needs) {
           return res.status(412).json({
-            error: "terms_not_accepted",
+            error: 'terms_not_accepted',
             currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
           });
         }
       }
     } catch (e) {
-      console.warn("[profile:put] terms check failed; allowing update", e);
+      console.warn('[profile:put] terms check failed; allowing update', e);
     }
 
     const {
@@ -332,13 +332,11 @@ router.put('/', async (req, res) => {
 });
 
 /* =========================================================
-   追加：draftフロー（仮保存→写真→確認→確定 / 途中破棄）
+   draftフロー（仮保存→写真→確認→確定 / 途中破棄）
    ========================================================= */
 
 /**
  * GET /api/profile/draft
- * - 仮保存があれば返す。なければ null
- * - 確定プロフィールも一緒に返す（確認画面で使いやすい）
  */
 router.get('/draft', async (req, res) => {
   try {
@@ -363,40 +361,20 @@ router.get('/draft', async (req, res) => {
       [uid],
     );
 
-    const p = await db.query(
-      `SELECT
-         p.nickname, p.age, p.gender, p.occupation,
-         p.education, p.university, p.hometown, p.residence,
-         p.personality, p.income, p.atmosphere,
-         p.photo_url, p.photo_masked_url, p.verified_age
-       FROM user_profiles p
-       WHERE p.user_id = $1`,
-      [uid],
-    );
-
     return res.json({
       ok: true,
-      draft: d.rows[0]
-        ? {
-            draft: d.rows[0].draft,
-            photo_tmp_url: d.rows[0].photo_tmp_url,
-            photo_tmp_pathname: d.rows[0].photo_tmp_pathname,
-            created_at: d.rows[0].created_at,
-            updated_at: d.rows[0].updated_at,
-          }
-        : null,
-      profile: p.rows[0] ?? null,
+      draft: d.rows[0] ?? null,
     });
   } catch (e: any) {
-    console.error('[profile/draft:get]', e?.message || e);
+    // ✅ ここで "本当の原因" が出ます（Vercel logs でも見える）
+    console.error('[profile/draft:get]', e);
     return res.status(500).json({ error: 'server_error' });
   }
 });
 
 /**
  * PUT /api/profile/draft
- * body: { nickname?, age?, ... }（仮保存なので緩め）
- * - user_profile_drafts.draft に upsert して保持
+ * - body を jsonb にマージ保存
  */
 router.put('/draft', async (req, res) => {
   try {
@@ -412,7 +390,7 @@ router.put('/draft', async (req, res) => {
     const uid = await resolveUserIdFromClaims(claims, db);
     if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
 
-    // terms check（draftでも同じ方針）
+    // terms check（draftも同じ方針）
     try {
       const cur = await getCurrentTerms(db);
       if (cur) {
@@ -420,13 +398,13 @@ router.put('/draft', async (req, res) => {
         const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
         if (needs) {
           return res.status(412).json({
-            error: "terms_not_accepted",
+            error: 'terms_not_accepted',
             currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
           });
         }
       }
     } catch (e) {
-      console.warn("[profile:draft] terms check failed; allowing draft save", e);
+      console.warn('[profile:draft:put] terms check failed; allowing draft save', e);
     }
 
     const body = req.body || {};
@@ -447,7 +425,7 @@ router.put('/draft', async (req, res) => {
 
     return res.json({ ok: true, draft: r.rows[0] });
   } catch (e: any) {
-    console.error('[profile/draft:put]', e?.message || e);
+    console.error('[profile/draft:put]', e);
     return res.status(500).json({ error: 'server_error' });
   }
 });
@@ -455,7 +433,7 @@ router.put('/draft', async (req, res) => {
 /**
  * POST /api/profile/confirm
  * - draft + photo_tmp_url を user_profiles に確定反映
- * - 成功したら user_profile_drafts は削除
+ * - 成功したら draft は削除
  */
 router.post('/confirm', async (req, res) => {
   const token = readBearer(req);
@@ -471,7 +449,7 @@ router.post('/confirm', async (req, res) => {
     const uid = await resolveUserIdFromClaims(claims, db);
     if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
 
-    // terms check（確定なので必須扱い）
+    // terms check（確定なので必須）
     const cur = await getCurrentTerms(db);
     if (cur) {
       const acc = await getLatestAcceptance(db, uid);
@@ -484,7 +462,7 @@ router.post('/confirm', async (req, res) => {
       }
     }
 
-    const client = await (db as any).connect();
+    const client = await db.connect();
     try {
       await client.query('BEGIN');
 
@@ -503,45 +481,45 @@ router.post('/confirm', async (req, res) => {
         return res.status(412).json({ error: 'draft_required' });
       }
 
-      const draft = d.rows[0].draft || {};
+      const draft = d.rows[0].draft ?? {};
       const photoTmpUrl: string | null = d.rows[0].photo_tmp_url ?? null;
 
-      const nf = normalizeFinalPayload(draft);
-      if (nf.ok !== true) {
+      const nf = normalizeFinalPayload(draft, photoTmpUrl);
+      if (!nf.ok) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: nf.error });
       }
 
-      // ✅ ここで data は確実に存在（TSもOK）
+      // ✅ nf.data はここで確実に存在（TSもOK）
       const data = nf.data;
 
       await client.query(
-        `
-        INSERT INTO user_profiles (
-          user_id, nickname, age, gender, occupation,
-          education, university, hometown, residence,
-          personality, income, atmosphere,
-          photo_url, photo_masked_url
-        ) VALUES (
-          $1, $2, $3, $4, $5,
-          $6, $7, $8, $9,
-          $10, $11, $12,
-          $13, $14
-        )
-        ON CONFLICT (user_id) DO UPDATE SET
-          nickname = EXCLUDED.nickname,
-          age = EXCLUDED.age,
-          gender = EXCLUDED.gender,
-          occupation = EXCLUDED.occupation,
-          education = EXCLUDED.education,
-          university = EXCLUDED.university,
-          hometown = EXCLUDED.hometown,
-          residence = EXCLUDED.residence,
-          personality = EXCLUDED.personality,
-          income = EXCLUDED.income,
-          atmosphere = EXCLUDED.atmosphere,
-          photo_url = COALESCE(EXCLUDED.photo_url, user_profiles.photo_url),
-          updated_at = now()
+        `INSERT INTO user_profiles (
+           user_id, nickname, age, gender, occupation,
+           education, university, hometown, residence,
+           personality, income, atmosphere,
+           photo_url, photo_masked_url
+         ) VALUES (
+           $1, $2, $3, $4, $5,
+           $6, $7, $8, $9,
+           $10, $11, $12,
+           $13, $14
+         )
+         ON CONFLICT (user_id) DO UPDATE SET
+           nickname = EXCLUDED.nickname,
+           age = EXCLUDED.age,
+           gender = EXCLUDED.gender,
+           occupation = EXCLUDED.occupation,
+           education = EXCLUDED.education,
+           university = EXCLUDED.university,
+           hometown = EXCLUDED.hometown,
+           residence = EXCLUDED.residence,
+           personality = EXCLUDED.personality,
+           income = EXCLUDED.income,
+           atmosphere = EXCLUDED.atmosphere,
+           photo_url = COALESCE(EXCLUDED.photo_url, user_profiles.photo_url),
+           photo_masked_url = COALESCE(EXCLUDED.photo_masked_url, user_profiles.photo_masked_url),
+           updated_at = now()
         `,
         [
           uid,
@@ -556,12 +534,12 @@ router.post('/confirm', async (req, res) => {
           data.personality,
           data.income,
           data.atmosphere,
-          photoTmpUrl,   // ✅ 仮写真を確定写真にする
-          null,          // photo_masked_url は将来用
+          data.photo_url,
+          data.photo_masked_url,
         ],
       );
 
-      // draft削除（確定したら破棄）
+      // ✅ 確定したら draft 削除（途中離脱の破棄と整合）
       await client.query(`DELETE FROM user_profile_drafts WHERE user_id = $1`, [uid]);
 
       await client.query('COMMIT');
@@ -584,19 +562,17 @@ router.post('/confirm', async (req, res) => {
       await client.query('ROLLBACK').catch(() => {});
       throw e;
     } finally {
-      client.release?.();
+      client.release();
     }
   } catch (e: any) {
-    console.error('[profile/confirm]', e?.message || e);
+    console.error('[profile/confirm]', e);
     return res.status(500).json({ error: 'server_error' });
   }
 });
 
 /**
  * DELETE /api/profile/draft
- * - 仮保存と仮写真参照を破棄（draftレコード削除）
- * - Blob削除は /api/blob/draft-photo/delete 側で行う想定
- *   → ここでは「削除すべき pathname」を返す
+ * - 仮保存(draft)を削除し、削除すべき tmp pathname を返す（Blob削除は blob.ts 側）
  */
 router.delete('/draft', async (req, res) => {
   try {
@@ -622,7 +598,7 @@ router.delete('/draft', async (req, res) => {
 
     return res.json({ ok: true, deleted: true, photo_tmp_pathname: pathname });
   } catch (e: any) {
-    console.error('[profile/draft:delete]', e?.message || e);
+    console.error('[profile/draft:delete]', e);
     return res.status(500).json({ error: 'server_error' });
   }
 });
