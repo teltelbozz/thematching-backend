@@ -6,14 +6,14 @@ const tokenService_1 = require("../auth/tokenService");
 const router = (0, express_1.Router)();
 /** ===== helpers ===== */
 function normalizeClaims(v) {
-    if (v && typeof v === 'object' && 'payload' in v)
+    if (v && typeof v === "object" && "payload" in v)
         return v.payload;
     return v;
 }
 function normalizeUidNumber(v) {
-    if (typeof v === 'number' && Number.isFinite(v))
+    if (typeof v === "number" && Number.isFinite(v))
         return v;
-    if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)))
+    if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)))
         return Number(v);
     return null;
 }
@@ -22,12 +22,12 @@ async function resolveUserIdFromClaims(claims, db) {
     const asNum = normalizeUidNumber(raw);
     if (asNum != null)
         return asNum;
-    if (typeof raw === 'string' && raw.trim()) {
+    if (typeof raw === "string" && raw.trim()) {
         const sub = raw.trim();
-        const r1 = await db.query('SELECT id FROM users WHERE line_user_id = $1 LIMIT 1', [sub]);
+        const r1 = await db.query("SELECT id FROM users WHERE line_user_id = $1 LIMIT 1", [sub]);
         if (r1.rows[0])
             return r1.rows[0].id;
-        const r2 = await db.query('INSERT INTO users (line_user_id) VALUES ($1) RETURNING id', [sub]);
+        const r2 = await db.query("INSERT INTO users (line_user_id) VALUES ($1) RETURNING id", [sub]);
         return r2.rows[0]?.id ?? null;
     }
     return null;
@@ -56,60 +56,65 @@ async function getLatestAcceptance(db, userId) {
     `, [userId]);
     return r.rows[0] ?? null;
 }
+/** draft保存は緩め（型だけ） */
 function validateDraftBody(b) {
-    if (!b || typeof b !== 'object')
-        return { ok: false, error: 'invalid_body' };
+    if (!b || typeof b !== "object")
+        return { ok: false, error: "invalid_body" };
     const fields = [
-        'nickname', 'age', 'gender', 'occupation',
-        'education', 'university', 'hometown', 'residence',
-        'personality', 'income', 'atmosphere',
+        "nickname",
+        "age",
+        "gender",
+        "occupation",
+        "education",
+        "university",
+        "hometown",
+        "residence",
+        "personality",
+        "income",
+        "atmosphere",
     ];
     for (const k of fields) {
         const v = b[k];
         if (v == null)
             continue;
-        if (k === 'age' || k === 'income') {
+        if (k === "age" || k === "income") {
             if (!Number.isFinite(Number(v)))
                 return { ok: false, error: `invalid_${k}` };
         }
         else {
-            if (typeof v !== 'string')
+            if (typeof v !== "string")
                 return { ok: false, error: `invalid_${k}` };
         }
     }
     return { ok: true };
 }
-/** 確定時用：draft row → user_profiles に入れる値へ（nickname必須） */
-function normalizeFinalPayload(draftRow) {
-    const p = draftRow || {};
+function normalizeFinalPayload(src) {
+    const p = src || {};
     const nicknameRaw = p.nickname;
-    if (typeof nicknameRaw !== 'string' || nicknameRaw.trim() === '') {
-        return { ok: false, error: 'nickname_required' };
-    }
-    const age = p.age === undefined || p.age === null || p.age === '' ? null : Number(p.age);
-    const income = p.income === undefined || p.income === null || p.income === '' ? null : Number(p.income);
-    if (age != null && !(Number.isInteger(age) && age >= 18 && age <= 120)) {
-        return { ok: false, error: 'invalid_age' };
-    }
-    if (income != null && !(Number.isInteger(income) && income >= 0 && income <= 10000)) {
-        return { ok: false, error: 'invalid_income' };
-    }
-    const gender = p.gender ?? null;
-    const occupation = p.occupation ?? null;
-    const education = p.education ?? null;
-    const university = p.university ?? null;
-    const hometown = p.hometown ?? null;
-    const residence = p.residence ?? null;
-    const personality = p.personality ?? null;
-    const atmosphere = p.atmosphere ?? null;
-    const strOk = (v) => v == null || typeof v === 'string';
-    if (![gender, occupation, education, university, hometown, residence, personality, atmosphere].every(strOk)) {
-        return { ok: false, error: 'invalid_string_field' };
-    }
+    const nickname = typeof nicknameRaw === "string" ? nicknameRaw.trim() : "";
+    if (!nickname)
+        return { ok: false, error: "nickname_required" };
+    const age = p.age === undefined || p.age === null || p.age === "" ? null : Number(p.age);
+    if (age != null && !(Number.isInteger(age) && age >= 18 && age <= 120))
+        return { ok: false, error: "invalid_age" };
+    const income = p.income === undefined || p.income === null || p.income === "" ? null : Number(p.income);
+    if (income != null && !(Number.isInteger(income) && income >= 0 && income <= 10000))
+        return { ok: false, error: "invalid_income" };
+    const strOrNull = (v) => (v == null ? null : typeof v === "string" ? v : null);
+    const gender = strOrNull(p.gender);
+    const occupation = strOrNull(p.occupation);
+    const education = strOrNull(p.education);
+    const university = strOrNull(p.university);
+    const hometown = strOrNull(p.hometown);
+    const residence = strOrNull(p.residence);
+    const personality = strOrNull(p.personality);
+    const atmosphere = strOrNull(p.atmosphere);
+    const photo_url = strOrNull(p.photo_url);
+    const photo_masked_url = strOrNull(p.photo_masked_url);
     return {
         ok: true,
         data: {
-            nickname: nicknameRaw.trim(),
+            nickname,
             age,
             gender,
             occupation,
@@ -120,27 +125,25 @@ function normalizeFinalPayload(draftRow) {
             personality,
             income,
             atmosphere,
-            // draftの写真を本採用（nullなら既存を維持する設計にする）
-            photo_url: p.draft_photo_url ?? null,
+            photo_url,
+            photo_masked_url,
         },
     };
 }
 /** ===== 既存：GET /api/profile（確定プロフィール） ===== */
-router.get('/', async (req, res) => {
+router.get("/", async (req, res) => {
     try {
         const token = (0, tokenService_1.readBearer)(req);
         if (!token)
-            return res.status(401).json({ error: 'unauthenticated' });
+            return res.status(401).json({ error: "unauthenticated" });
         const verified = await (0, tokenService_1.verifyAccess)(token);
         const claims = normalizeClaims(verified);
         const db = req.app.locals.db;
-        if (!db) {
-            console.error('[profile:get] db_not_initialized');
-            return res.status(500).json({ error: 'server_error' });
-        }
+        if (!db)
+            return res.status(500).json({ error: "server_error" });
         const uid = await resolveUserIdFromClaims(claims, db);
         if (uid == null)
-            return res.status(401).json({ error: 'unauthenticated' });
+            return res.status(401).json({ error: "unauthenticated" });
         const r = await db.query(`SELECT
          u.id, u.line_user_id, u.payment_method_set,
          p.nickname, p.age, p.gender, p.occupation,
@@ -155,26 +158,24 @@ router.get('/', async (req, res) => {
         return res.json({ profile: r.rows[0] });
     }
     catch (e) {
-        console.error('[profile:get]', e?.message || e);
-        return res.status(500).json({ error: 'server_error' });
+        console.error("[profile:get]", e?.message || e);
+        return res.status(500).json({ error: "server_error" });
     }
 });
 /** ===== 既存：PUT /api/profile（確定プロフィール upsert） ===== */
-router.put('/', async (req, res) => {
+router.put("/", async (req, res) => {
     try {
         const token = (0, tokenService_1.readBearer)(req);
         if (!token)
-            return res.status(401).json({ error: 'unauthenticated' });
+            return res.status(401).json({ error: "unauthenticated" });
         const verified = await (0, tokenService_1.verifyAccess)(token);
         const claims = normalizeClaims(verified);
         const db = req.app.locals.db;
-        if (!db) {
-            console.error('[profile:put] db_not_initialized');
-            return res.status(500).json({ error: 'server_error' });
-        }
+        if (!db)
+            return res.status(500).json({ error: "server_error" });
         const uid = await resolveUserIdFromClaims(claims, db);
         if (uid == null)
-            return res.status(401).json({ error: 'unauthenticated' });
+            return res.status(401).json({ error: "unauthenticated" });
         // terms check（既存どおり）
         try {
             const cur = await getCurrentTerms(db);
@@ -183,43 +184,43 @@ router.put('/', async (req, res) => {
                 const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
                 if (needs) {
                     return res.status(412).json({
-                        error: 'terms_not_accepted',
+                        error: "terms_not_accepted",
                         currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
                     });
                 }
             }
         }
         catch (e) {
-            console.warn('[profile:put] terms check failed; allowing update', e);
+            console.warn("[profile:put] terms check failed; allowing update", e);
         }
         const { nickname, age, gender, occupation, education, university, hometown, residence, personality, income, atmosphere, photo_url, photo_masked_url, } = req.body || {};
-        // バリデーション（既存どおり）
-        if (nickname != null && typeof nickname !== 'string')
-            return res.status(400).json({ error: 'invalid_nickname' });
+        // 既存の緩めバリデーション
+        if (nickname != null && typeof nickname !== "string")
+            return res.status(400).json({ error: "invalid_nickname" });
         if (age != null && !(Number.isInteger(age) && age >= 18 && age <= 120))
-            return res.status(400).json({ error: 'invalid_age' });
-        if (gender != null && typeof gender !== 'string')
-            return res.status(400).json({ error: 'invalid_gender' });
-        if (occupation != null && typeof occupation !== 'string')
-            return res.status(400).json({ error: 'invalid_occupation' });
-        if (education != null && typeof education !== 'string')
-            return res.status(400).json({ error: 'invalid_education' });
-        if (university != null && typeof university !== 'string')
-            return res.status(400).json({ error: 'invalid_university' });
-        if (hometown != null && typeof hometown !== 'string')
-            return res.status(400).json({ error: 'invalid_hometown' });
-        if (residence != null && typeof residence !== 'string')
-            return res.status(400).json({ error: 'invalid_residence' });
-        if (personality != null && typeof personality !== 'string')
-            return res.status(400).json({ error: 'invalid_personality' });
+            return res.status(400).json({ error: "invalid_age" });
+        if (gender != null && typeof gender !== "string")
+            return res.status(400).json({ error: "invalid_gender" });
+        if (occupation != null && typeof occupation !== "string")
+            return res.status(400).json({ error: "invalid_occupation" });
+        if (education != null && typeof education !== "string")
+            return res.status(400).json({ error: "invalid_education" });
+        if (university != null && typeof university !== "string")
+            return res.status(400).json({ error: "invalid_university" });
+        if (hometown != null && typeof hometown !== "string")
+            return res.status(400).json({ error: "invalid_hometown" });
+        if (residence != null && typeof residence !== "string")
+            return res.status(400).json({ error: "invalid_residence" });
+        if (personality != null && typeof personality !== "string")
+            return res.status(400).json({ error: "invalid_personality" });
         if (income != null && !(Number.isInteger(income) && income >= 0 && income <= 10000))
-            return res.status(400).json({ error: 'invalid_income' });
-        if (atmosphere != null && typeof atmosphere !== 'string')
-            return res.status(400).json({ error: 'invalid_atmosphere' });
-        if (photo_url != null && typeof photo_url !== 'string')
-            return res.status(400).json({ error: 'invalid_photo_url' });
-        if (photo_masked_url != null && typeof photo_masked_url !== 'string')
-            return res.status(400).json({ error: 'invalid_photo_masked_url' });
+            return res.status(400).json({ error: "invalid_income" });
+        if (atmosphere != null && typeof atmosphere !== "string")
+            return res.status(400).json({ error: "invalid_atmosphere" });
+        if (photo_url != null && typeof photo_url !== "string")
+            return res.status(400).json({ error: "invalid_photo_url" });
+        if (photo_masked_url != null && typeof photo_masked_url !== "string")
+            return res.status(400).json({ error: "invalid_photo_masked_url" });
         await db.query(`INSERT INTO user_profiles (
          user_id, nickname, age, gender, occupation,
          education, university, hometown, residence,
@@ -273,29 +274,30 @@ router.put('/', async (req, res) => {
         return res.json({ profile: r.rows[0] });
     }
     catch (e) {
-        console.error('[profile:put]', e?.message || e);
-        return res.status(500).json({ error: 'server_error' });
+        console.error("[profile:put]", e?.message || e);
+        return res.status(500).json({ error: "server_error" });
     }
 });
 /* =========================================================
-   追加：draftフロー（profile_drafts テーブル版）
+   draftフロー（仮保存→写真→確認→確定 / 途中破棄）
+   テーブル: public.profile_drafts（あなたのDDL）
    ========================================================= */
 /**
  * GET /api/profile/draft
  */
-router.get('/draft', async (req, res) => {
+router.get("/draft", async (req, res) => {
     try {
         const token = (0, tokenService_1.readBearer)(req);
         if (!token)
-            return res.status(401).json({ error: 'unauthenticated' });
+            return res.status(401).json({ error: "unauthenticated" });
         const verified = await (0, tokenService_1.verifyAccess)(token);
         const claims = normalizeClaims(verified);
         const db = req.app.locals.db;
         if (!db)
-            return res.status(500).json({ error: 'server_error' });
+            return res.status(500).json({ error: "server_error" });
         const uid = await resolveUserIdFromClaims(claims, db);
         if (uid == null)
-            return res.status(401).json({ error: 'unauthenticated' });
+            return res.status(401).json({ error: "unauthenticated" });
         const d = await db.query(`
       SELECT
         user_id,
@@ -307,54 +309,53 @@ router.get('/draft', async (req, res) => {
       FROM profile_drafts
       WHERE user_id = $1
       `, [uid]);
-        if (!d.rows[0])
-            return res.json({ ok: true, draft: null });
-        const row = d.rows[0];
         return res.json({
             ok: true,
-            draft: {
-                draft_id: Number(row.user_id),
-                nickname: row.nickname ?? null,
-                age: row.age ?? null,
-                gender: row.gender ?? null,
-                occupation: row.occupation ?? null,
-                education: row.education ?? null,
-                university: row.university ?? null,
-                hometown: row.hometown ?? null,
-                residence: row.residence ?? null,
-                personality: row.personality ?? null,
-                income: row.income ?? null,
-                atmosphere: row.atmosphere ?? null,
-                photo_url: row.draft_photo_url ?? null,
-                photo_pathname: row.draft_photo_pathname ?? null,
-                created_at: row.created_at,
-                updated_at: row.updated_at,
-            },
+            draft: d.rows[0]
+                ? {
+                    user_id: d.rows[0].user_id,
+                    nickname: d.rows[0].nickname,
+                    age: d.rows[0].age,
+                    gender: d.rows[0].gender,
+                    occupation: d.rows[0].occupation,
+                    education: d.rows[0].education,
+                    university: d.rows[0].university,
+                    hometown: d.rows[0].hometown,
+                    residence: d.rows[0].residence,
+                    personality: d.rows[0].personality,
+                    income: d.rows[0].income,
+                    atmosphere: d.rows[0].atmosphere,
+                    photo_url: d.rows[0].draft_photo_url,
+                    photo_pathname: d.rows[0].draft_photo_pathname,
+                    created_at: d.rows[0].created_at,
+                    updated_at: d.rows[0].updated_at,
+                }
+                : null,
         });
     }
     catch (e) {
-        console.error('[profile/draft:get]', e?.message || e);
-        return res.status(500).json({ error: 'server_error' });
+        console.error("[profile/draft:get]", e?.message || e);
+        return res.status(500).json({ error: "server_error" });
     }
 });
 /**
  * PUT /api/profile/draft
  * - 仮保存（緩め）
  */
-router.put('/draft', async (req, res) => {
+router.put("/draft", async (req, res) => {
     try {
         const token = (0, tokenService_1.readBearer)(req);
         if (!token)
-            return res.status(401).json({ error: 'unauthenticated' });
+            return res.status(401).json({ error: "unauthenticated" });
         const verified = await (0, tokenService_1.verifyAccess)(token);
         const claims = normalizeClaims(verified);
         const db = req.app.locals.db;
         if (!db)
-            return res.status(500).json({ error: 'server_error' });
+            return res.status(500).json({ error: "server_error" });
         const uid = await resolveUserIdFromClaims(claims, db);
         if (uid == null)
-            return res.status(401).json({ error: 'unauthenticated' });
-        // terms check（仮保存でも同じ方針で）
+            return res.status(401).json({ error: "unauthenticated" });
+        // terms（draftでも同じ方針）
         try {
             const cur = await getCurrentTerms(db);
             if (cur) {
@@ -362,47 +363,57 @@ router.put('/draft', async (req, res) => {
                 const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
                 if (needs) {
                     return res.status(412).json({
-                        error: 'terms_not_accepted',
+                        error: "terms_not_accepted",
                         currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
                     });
                 }
             }
         }
         catch (e) {
-            console.warn('[profile:draft:put] terms check failed; allowing draft save', e);
+            console.warn("[profile:draft] terms check failed; allowing draft save", e);
         }
         const body = req.body || {};
         const v = validateDraftBody(body);
         if (!v.ok)
             return res.status(400).json({ error: v.error });
-        // 数値は null or number に寄せる（DB型に合わせる）
-        const age = body.age == null || body.age === '' ? null : Number(body.age);
-        const income = body.income == null || body.income === '' ? null : Number(body.income);
+        // 受け取ったものだけ更新（null/undefinedは“未更新”扱い）
+        const toNumOrNull = (x) => x === undefined || x === null || x === "" ? null : Number(x);
+        const nickname = body.nickname ?? undefined;
+        const age = body.age !== undefined ? toNumOrNull(body.age) : undefined;
+        const gender = body.gender ?? undefined;
+        const occupation = body.occupation ?? undefined;
+        const education = body.education ?? undefined;
+        const university = body.university ?? undefined;
+        const hometown = body.hometown ?? undefined;
+        const residence = body.residence ?? undefined;
+        const personality = body.personality ?? undefined;
+        const income = body.income !== undefined ? toNumOrNull(body.income) : undefined;
+        const atmosphere = body.atmosphere ?? undefined;
         const r = await db.query(`
       INSERT INTO profile_drafts (
         user_id,
         nickname, age, gender, occupation,
         education, university, hometown, residence,
         personality, income, atmosphere,
-        updated_at
+        created_at, updated_at
       ) VALUES (
         $1,
         $2, $3, $4, $5,
         $6, $7, $8, $9,
         $10, $11, $12,
-        now()
+        now(), now()
       )
       ON CONFLICT (user_id) DO UPDATE SET
-        nickname   = COALESCE(EXCLUDED.nickname, profile_drafts.nickname),
-        age        = COALESCE(EXCLUDED.age, profile_drafts.age),
-        gender     = COALESCE(EXCLUDED.gender, profile_drafts.gender),
+        nickname = COALESCE(EXCLUDED.nickname, profile_drafts.nickname),
+        age = COALESCE(EXCLUDED.age, profile_drafts.age),
+        gender = COALESCE(EXCLUDED.gender, profile_drafts.gender),
         occupation = COALESCE(EXCLUDED.occupation, profile_drafts.occupation),
-        education  = COALESCE(EXCLUDED.education, profile_drafts.education),
+        education = COALESCE(EXCLUDED.education, profile_drafts.education),
         university = COALESCE(EXCLUDED.university, profile_drafts.university),
-        hometown   = COALESCE(EXCLUDED.hometown, profile_drafts.hometown),
-        residence  = COALESCE(EXCLUDED.residence, profile_drafts.residence),
-        personality= COALESCE(EXCLUDED.personality, profile_drafts.personality),
-        income     = COALESCE(EXCLUDED.income, profile_drafts.income),
+        hometown = COALESCE(EXCLUDED.hometown, profile_drafts.hometown),
+        residence = COALESCE(EXCLUDED.residence, profile_drafts.residence),
+        personality = COALESCE(EXCLUDED.personality, profile_drafts.personality),
+        income = COALESCE(EXCLUDED.income, profile_drafts.income),
         atmosphere = COALESCE(EXCLUDED.atmosphere, profile_drafts.atmosphere),
         updated_at = now()
       RETURNING
@@ -414,99 +425,116 @@ router.put('/draft', async (req, res) => {
         created_at, updated_at
       `, [
             uid,
-            body.nickname ?? null,
-            age,
-            body.gender ?? null,
-            body.occupation ?? null,
-            body.education ?? null,
-            body.university ?? null,
-            body.hometown ?? null,
-            body.residence ?? null,
-            body.personality ?? null,
-            income,
-            body.atmosphere ?? null,
+            nickname ?? null,
+            age ?? null,
+            gender ?? null,
+            occupation ?? null,
+            education ?? null,
+            university ?? null,
+            hometown ?? null,
+            residence ?? null,
+            personality ?? null,
+            income ?? null,
+            atmosphere ?? null,
         ]);
         const row = r.rows[0];
         return res.json({
             ok: true,
             draft: {
-                draft_id: Number(row.user_id),
-                nickname: row.nickname ?? null,
-                age: row.age ?? null,
-                gender: row.gender ?? null,
-                occupation: row.occupation ?? null,
-                education: row.education ?? null,
-                university: row.university ?? null,
-                hometown: row.hometown ?? null,
-                residence: row.residence ?? null,
-                personality: row.personality ?? null,
-                income: row.income ?? null,
-                atmosphere: row.atmosphere ?? null,
-                photo_url: row.draft_photo_url ?? null,
-                photo_pathname: row.draft_photo_pathname ?? null,
+                user_id: row.user_id,
+                nickname: row.nickname,
+                age: row.age,
+                gender: row.gender,
+                occupation: row.occupation,
+                education: row.education,
+                university: row.university,
+                hometown: row.hometown,
+                residence: row.residence,
+                personality: row.personality,
+                income: row.income,
+                atmosphere: row.atmosphere,
+                photo_url: row.draft_photo_url,
+                photo_pathname: row.draft_photo_pathname,
                 created_at: row.created_at,
                 updated_at: row.updated_at,
             },
         });
     }
     catch (e) {
-        console.error('[profile/draft:put]', e?.message || e);
-        return res.status(500).json({ error: 'server_error' });
+        console.error("[profile/draft:put]", e?.message || e);
+        return res.status(500).json({ error: "server_error" });
     }
 });
 /**
  * POST /api/profile/confirm
- * - profile_drafts の内容 + draft_photo_url を user_profiles に反映
- * - 成功したら profile_drafts を削除
+ * - profile_drafts の内容を user_profiles に確定反映
+ * - draft_photo_url を photo_url として本採用
+ * - 成功したら profile_drafts は削除
  */
-router.post('/confirm', async (req, res) => {
+router.post("/confirm", async (req, res) => {
     const token = (0, tokenService_1.readBearer)(req);
     if (!token)
-        return res.status(401).json({ error: 'unauthenticated' });
+        return res.status(401).json({ error: "unauthenticated" });
     try {
         const verified = await (0, tokenService_1.verifyAccess)(token);
         const claims = normalizeClaims(verified);
         const db = req.app.locals.db;
         if (!db)
-            return res.status(500).json({ error: 'server_error' });
+            return res.status(500).json({ error: "server_error" });
         const uid = await resolveUserIdFromClaims(claims, db);
         if (uid == null)
-            return res.status(401).json({ error: 'unauthenticated' });
-        // terms check（確定なので必須扱い）
+            return res.status(401).json({ error: "unauthenticated" });
+        // terms（確定なので必須）
         const cur = await getCurrentTerms(db);
         if (cur) {
             const acc = await getLatestAcceptance(db, uid);
             const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
             if (needs) {
                 return res.status(412).json({
-                    error: 'terms_not_accepted',
+                    error: "terms_not_accepted",
                     currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
                 });
             }
         }
         const client = await db.connect();
         try {
-            await client.query('BEGIN');
+            await client.query("BEGIN");
             const d = await client.query(`
         SELECT
           nickname, age, gender, occupation,
           education, university, hometown, residence,
           personality, income, atmosphere,
-          draft_photo_url, draft_photo_pathname
+          draft_photo_url
         FROM profile_drafts
         WHERE user_id = $1
         FOR UPDATE
         `, [uid]);
             if (!d.rows[0]) {
-                await client.query('ROLLBACK');
-                return res.status(412).json({ error: 'draft_required' });
+                await client.query("ROLLBACK");
+                return res.status(412).json({ error: "draft_required" });
             }
-            const nf = normalizeFinalPayload(d.rows[0]);
+            const row = d.rows[0];
+            const nf = normalizeFinalPayload({
+                nickname: row.nickname,
+                age: row.age,
+                gender: row.gender,
+                occupation: row.occupation,
+                education: row.education,
+                university: row.university,
+                hometown: row.hometown,
+                residence: row.residence,
+                personality: row.personality,
+                income: row.income,
+                atmosphere: row.atmosphere,
+                photo_url: row.draft_photo_url ?? null, // ★draft写真を本採用
+                photo_masked_url: null,
+            });
             if (!nf.ok) {
-                await client.query('ROLLBACK');
+                await client.query("ROLLBACK");
                 return res.status(400).json({ error: nf.error });
             }
-            const data = nf.data; // <- ここで確定的に束縛（TS的にも undefined にならない）
+            // ここで TypeScript 的にも data は確実に存在
+            const data = nf.data;
             await client.query(`
         INSERT INTO user_profiles (
           user_id, nickname, age, gender, occupation,
@@ -517,22 +545,23 @@ router.post('/confirm', async (req, res) => {
           $1, $2, $3, $4, $5,
           $6, $7, $8, $9,
           $10, $11, $12,
-          $13, NULL
+          $13, $14
         )
         ON CONFLICT (user_id) DO UPDATE SET
-          nickname = COALESCE(EXCLUDED.nickname, user_profiles.nickname),
-          age = COALESCE(EXCLUDED.age, user_profiles.age),
-          gender = COALESCE(EXCLUDED.gender, user_profiles.gender),
-          occupation = COALESCE(EXCLUDED.occupation, user_profiles.occupation),
-          education = COALESCE(EXCLUDED.education, user_profiles.education),
-          university = COALESCE(EXCLUDED.university, user_profiles.university),
-          hometown = COALESCE(EXCLUDED.hometown, user_profiles.hometown),
-          residence = COALESCE(EXCLUDED.residence, user_profiles.residence),
-          personality = COALESCE(EXCLUDED.personality, user_profiles.personality),
-          income = COALESCE(EXCLUDED.income, user_profiles.income),
-          atmosphere = COALESCE(EXCLUDED.atmosphere, user_profiles.atmosphere),
-          photo_url = COALESCE(EXCLUDED.photo_url, user_profiles.photo_url),
-          updated_at = NOW()
+          nickname = EXCLUDED.nickname,
+          age = EXCLUDED.age,
+          gender = EXCLUDED.gender,
+          occupation = EXCLUDED.occupation,
+          education = EXCLUDED.education,
+          university = EXCLUDED.university,
+          hometown = EXCLUDED.hometown,
+          residence = EXCLUDED.residence,
+          personality = EXCLUDED.personality,
+          income = EXCLUDED.income,
+          atmosphere = EXCLUDED.atmosphere,
+          photo_url = EXCLUDED.photo_url,
+          photo_masked_url = EXCLUDED.photo_masked_url,
+          updated_at = now()
         `, [
                 uid,
                 data.nickname,
@@ -546,10 +575,12 @@ router.post('/confirm', async (req, res) => {
                 data.personality,
                 data.income,
                 data.atmosphere,
-                data.photo_url, // draft_photo_url を本採用（nullなら既存維持）
+                data.photo_url, // ← draft_photo_url を本採用
+                data.photo_masked_url,
             ]);
-            await client.query('DELETE FROM profile_drafts WHERE user_id = $1', [uid]);
-            await client.query('COMMIT');
+            // draftは削除（途中離脱は「破棄」の前提）
+            await client.query(`DELETE FROM profile_drafts WHERE user_id = $1`, [uid]);
+            await client.query("COMMIT");
             const r = await db.query(`SELECT
            u.id, u.line_user_id, u.payment_method_set,
            p.nickname, p.age, p.gender, p.occupation,
@@ -562,43 +593,43 @@ router.post('/confirm', async (req, res) => {
             return res.json({ ok: true, profile: r.rows[0] });
         }
         catch (e) {
-            await client.query('ROLLBACK').catch(() => { });
+            await client.query("ROLLBACK").catch(() => { });
             throw e;
         }
         finally {
-            client.release();
+            client.release?.();
         }
     }
     catch (e) {
-        console.error('[profile/confirm]', e?.message || e);
-        return res.status(500).json({ error: 'server_error' });
+        console.error("[profile/confirm]", e?.message || e);
+        return res.status(500).json({ error: "server_error" });
     }
 });
 /**
  * POST /api/profile/cancel
- * - draft を破棄（写真のBlob削除は blob.ts 側で実施するので pathname を返す）
+ * - draftを破棄（必要ならフロントが blob delete を呼べるよう pathname も返す）
  */
-router.post('/cancel', async (req, res) => {
+router.post("/cancel", async (req, res) => {
     try {
         const token = (0, tokenService_1.readBearer)(req);
         if (!token)
-            return res.status(401).json({ error: 'unauthenticated' });
+            return res.status(401).json({ error: "unauthenticated" });
         const verified = await (0, tokenService_1.verifyAccess)(token);
         const claims = normalizeClaims(verified);
         const db = req.app.locals.db;
         if (!db)
-            return res.status(500).json({ error: 'server_error' });
+            return res.status(500).json({ error: "server_error" });
         const uid = await resolveUserIdFromClaims(claims, db);
         if (uid == null)
-            return res.status(401).json({ error: 'unauthenticated' });
-        const d = await db.query(`SELECT draft_photo_pathname FROM profile_drafts WHERE user_id = $1`, [uid]);
-        const pathname = d.rows[0]?.draft_photo_pathname ?? null;
+            return res.status(401).json({ error: "unauthenticated" });
+        const r = await db.query(`SELECT draft_photo_pathname FROM profile_drafts WHERE user_id = $1`, [uid]);
+        const pathname = r.rows[0]?.draft_photo_pathname ?? null;
         await db.query(`DELETE FROM profile_drafts WHERE user_id = $1`, [uid]);
         return res.json({ ok: true, cancelled: true, draft_photo_pathname: pathname });
     }
     catch (e) {
-        console.error('[profile/cancel]', e?.message || e);
-        return res.status(500).json({ error: 'server_error' });
+        console.error("[profile/cancel]", e?.message || e);
+        return res.status(500).json({ error: "server_error" });
     }
 });
 exports.default = router;
