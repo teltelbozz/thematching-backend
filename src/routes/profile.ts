@@ -2,7 +2,6 @@
 import { Router } from 'express';
 import type { Pool } from 'pg';
 import { readBearer, verifyAccess } from '../auth/tokenService';
-import { del } from '@vercel/blob';
 
 const router = Router();
 
@@ -16,6 +15,7 @@ function normalizeUidNumber(v: unknown): number | null {
   if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
   return null;
 }
+
 async function resolveUserIdFromClaims(claims: any, db: Pool): Promise<number | null> {
   const raw = claims?.uid;
 
@@ -24,7 +24,11 @@ async function resolveUserIdFromClaims(claims: any, db: Pool): Promise<number | 
 
   if (typeof raw === 'string' && raw.trim()) {
     const sub = raw.trim();
-    const r1 = await db.query<{ id: number }>('SELECT id FROM users WHERE line_user_id = $1 LIMIT 1', [sub]);
+
+    const r1 = await db.query<{ id: number }>(
+      'SELECT id FROM users WHERE line_user_id = $1 LIMIT 1',
+      [sub],
+    );
     if (r1.rows[0]) return r1.rows[0].id;
 
     const r2 = await db.query<{ id: number }>(
@@ -66,53 +70,67 @@ async function getLatestAcceptance(db: Pool, userId: number) {
   return r.rows[0] ?? null;
 }
 
-type FinalOk = {
-  ok: true;
-  data: {
-    nickname: string;
-    age: number | null;
-    gender: string | null;
-    occupation: string | null;
-    education: string | null;
-    university: string | null;
-    hometown: string | null;
-    residence: string | null;
-    personality: string | null;
-    income: number | null;
-    atmosphere: string | null;
-  };
-};
-type FinalErr = { ok: false; error: string };
-function normalizeFinalPayload(p: any): FinalOk | FinalErr {
-  const nickname = p?.nickname;
+function validateDraftBody(b: any) {
+  if (!b || typeof b !== 'object') return { ok: false as const, error: 'invalid_body' as const };
 
-  const age = p?.age === undefined || p?.age === null || p?.age === '' ? null : Number(p.age);
-  const income = p?.income === undefined || p?.income === null || p?.income === '' ? null : Number(p.income);
+  const fields = [
+    'nickname', 'age', 'gender', 'occupation',
+    'education', 'university', 'hometown', 'residence',
+    'personality', 'income', 'atmosphere',
+  ] as const;
 
-  const gender = p?.gender ?? null;
-  const occupation = p?.occupation ?? null;
+  for (const k of fields) {
+    const v = (b as any)[k];
+    if (v == null) continue;
 
-  const education = p?.education ?? null;
-  const university = p?.university ?? null;
-  const hometown = p?.hometown ?? null;
-  const residence = p?.residence ?? null;
-  const personality = p?.personality ?? null;
-  const atmosphere = p?.atmosphere ?? null;
+    if (k === 'age' || k === 'income') {
+      if (!Number.isFinite(Number(v))) return { ok: false as const, error: `invalid_${k}` as const };
+    } else {
+      if (typeof v !== 'string') return { ok: false as const, error: `invalid_${k}` as const };
+    }
+  }
+  return { ok: true as const };
+}
 
-  if (typeof nickname !== 'string' || nickname.trim() === '') return { ok: false, error: 'nickname_required' };
-  if (age != null && !(Number.isInteger(age) && age >= 18 && age <= 120)) return { ok: false, error: 'invalid_age' };
-  if (income != null && !(Number.isInteger(income) && income >= 0 && income <= 10_000))
-    return { ok: false, error: 'invalid_income' };
+/** 確定時用：draft row → user_profiles に入れる値へ（nickname必須） */
+function normalizeFinalPayload(draftRow: any) {
+  const p = draftRow || {};
+
+  const nicknameRaw = p.nickname;
+  if (typeof nicknameRaw !== 'string' || nicknameRaw.trim() === '') {
+    return { ok: false as const, error: 'nickname_required' as const };
+  }
+
+  const age =
+    p.age === undefined || p.age === null || p.age === '' ? null : Number(p.age);
+  const income =
+    p.income === undefined || p.income === null || p.income === '' ? null : Number(p.income);
+
+  if (age != null && !(Number.isInteger(age) && age >= 18 && age <= 120)) {
+    return { ok: false as const, error: 'invalid_age' as const };
+  }
+  if (income != null && !(Number.isInteger(income) && income >= 0 && income <= 10_000)) {
+    return { ok: false as const, error: 'invalid_income' as const };
+  }
+
+  const gender = p.gender ?? null;
+  const occupation = p.occupation ?? null;
+  const education = p.education ?? null;
+  const university = p.university ?? null;
+  const hometown = p.hometown ?? null;
+  const residence = p.residence ?? null;
+  const personality = p.personality ?? null;
+  const atmosphere = p.atmosphere ?? null;
 
   const strOk = (v: any) => v == null || typeof v === 'string';
   if (![gender, occupation, education, university, hometown, residence, personality, atmosphere].every(strOk)) {
-    return { ok: false, error: 'invalid_string_field' };
+    return { ok: false as const, error: 'invalid_string_field' as const };
   }
 
   return {
-    ok: true,
+    ok: true as const,
     data: {
-      nickname: nickname.trim(),
+      nickname: nicknameRaw.trim(),
       age,
       gender,
       occupation,
@@ -123,6 +141,8 @@ function normalizeFinalPayload(p: any): FinalOk | FinalErr {
       personality,
       income,
       atmosphere,
+      // draftの写真を本採用（nullなら既存を維持する設計にする）
+      photo_url: p.draft_photo_url ?? null,
     },
   };
 }
@@ -137,7 +157,10 @@ router.get('/', async (req, res) => {
     const claims = normalizeClaims(verified);
 
     const db = req.app.locals.db as Pool | undefined;
-    if (!db) return res.status(500).json({ error: 'server_error' });
+    if (!db) {
+      console.error('[profile:get] db_not_initialized');
+      return res.status(500).json({ error: 'server_error' });
+    }
 
     const uid = await resolveUserIdFromClaims(claims, db);
     if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
@@ -163,7 +186,136 @@ router.get('/', async (req, res) => {
   }
 });
 
-/** ===== 新：GET /api/profile/draft ===== */
+/** ===== 既存：PUT /api/profile（確定プロフィール upsert） ===== */
+router.put('/', async (req, res) => {
+  try {
+    const token = readBearer(req);
+    if (!token) return res.status(401).json({ error: 'unauthenticated' });
+
+    const verified = await verifyAccess(token);
+    const claims = normalizeClaims(verified);
+
+    const db = req.app.locals.db as Pool | undefined;
+    if (!db) {
+      console.error('[profile:put] db_not_initialized');
+      return res.status(500).json({ error: 'server_error' });
+    }
+
+    const uid = await resolveUserIdFromClaims(claims, db);
+    if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
+
+    // terms check（既存どおり）
+    try {
+      const cur = await getCurrentTerms(db);
+      if (cur) {
+        const acc = await getLatestAcceptance(db, uid);
+        const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
+        if (needs) {
+          return res.status(412).json({
+            error: 'terms_not_accepted',
+            currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[profile:put] terms check failed; allowing update', e);
+    }
+
+    const {
+      nickname, age, gender, occupation,
+      education, university, hometown, residence,
+      personality, income, atmosphere,
+      photo_url, photo_masked_url,
+    } = req.body || {};
+
+    // バリデーション（既存どおり）
+    if (nickname != null && typeof nickname !== 'string') return res.status(400).json({ error: 'invalid_nickname' });
+    if (age != null && !(Number.isInteger(age) && age >= 18 && age <= 120)) return res.status(400).json({ error: 'invalid_age' });
+    if (gender != null && typeof gender !== 'string') return res.status(400).json({ error: 'invalid_gender' });
+    if (occupation != null && typeof occupation !== 'string') return res.status(400).json({ error: 'invalid_occupation' });
+
+    if (education != null && typeof education !== 'string') return res.status(400).json({ error: 'invalid_education' });
+    if (university != null && typeof university !== 'string') return res.status(400).json({ error: 'invalid_university' });
+    if (hometown != null && typeof hometown !== 'string') return res.status(400).json({ error: 'invalid_hometown' });
+    if (residence != null && typeof residence !== 'string') return res.status(400).json({ error: 'invalid_residence' });
+    if (personality != null && typeof personality !== 'string') return res.status(400).json({ error: 'invalid_personality' });
+    if (income != null && !(Number.isInteger(income) && income >= 0 && income <= 10_000)) return res.status(400).json({ error: 'invalid_income' });
+    if (atmosphere != null && typeof atmosphere !== 'string') return res.status(400).json({ error: 'invalid_atmosphere' });
+
+    if (photo_url != null && typeof photo_url !== 'string') return res.status(400).json({ error: 'invalid_photo_url' });
+    if (photo_masked_url != null && typeof photo_masked_url !== 'string') return res.status(400).json({ error: 'invalid_photo_masked_url' });
+
+    await db.query(
+      `INSERT INTO user_profiles (
+         user_id, nickname, age, gender, occupation,
+         education, university, hometown, residence,
+         personality, income, atmosphere,
+         photo_url, photo_masked_url
+       ) VALUES (
+         $1, $2, $3, $4, $5,
+         $6, $7, $8, $9,
+         $10, $11, $12,
+         $13, $14
+       )
+       ON CONFLICT (user_id) DO UPDATE SET
+         nickname = COALESCE(EXCLUDED.nickname, user_profiles.nickname),
+         age = COALESCE(EXCLUDED.age, user_profiles.age),
+         gender = COALESCE(EXCLUDED.gender, user_profiles.gender),
+         occupation = COALESCE(EXCLUDED.occupation, user_profiles.occupation),
+         education = COALESCE(EXCLUDED.education, user_profiles.education),
+         university = COALESCE(EXCLUDED.university, user_profiles.university),
+         hometown = COALESCE(EXCLUDED.hometown, user_profiles.hometown),
+         residence = COALESCE(EXCLUDED.residence, user_profiles.residence),
+         personality = COALESCE(EXCLUDED.personality, user_profiles.personality),
+         income = COALESCE(EXCLUDED.income, user_profiles.income),
+         atmosphere = COALESCE(EXCLUDED.atmosphere, user_profiles.atmosphere),
+         photo_url = COALESCE(EXCLUDED.photo_url, user_profiles.photo_url),
+         photo_masked_url = COALESCE(EXCLUDED.photo_masked_url, user_profiles.photo_masked_url),
+         updated_at = NOW()`,
+      [
+        uid,
+        nickname ?? null,
+        age ?? null,
+        gender ?? null,
+        occupation ?? null,
+        education ?? null,
+        university ?? null,
+        hometown ?? null,
+        residence ?? null,
+        personality ?? null,
+        income ?? null,
+        atmosphere ?? null,
+        photo_url ?? null,
+        photo_masked_url ?? null,
+      ],
+    );
+
+    const r = await db.query(
+      `SELECT
+         u.id, u.line_user_id, u.payment_method_set,
+         p.nickname, p.age, p.gender, p.occupation,
+         p.education, p.university, p.hometown, p.residence,
+         p.personality, p.income, p.atmosphere,
+         p.photo_url, p.photo_masked_url, p.verified_age
+       FROM users u
+       LEFT JOIN user_profiles p ON p.user_id = u.id
+       WHERE u.id = $1`,
+      [uid],
+    );
+    return res.json({ profile: r.rows[0] });
+  } catch (e: any) {
+    console.error('[profile:put]', e?.message || e);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+/* =========================================================
+   追加：draftフロー（profile_drafts テーブル版）
+   ========================================================= */
+
+/**
+ * GET /api/profile/draft
+ */
 router.get('/draft', async (req, res) => {
   try {
     const token = readBearer(req);
@@ -199,20 +351,20 @@ router.get('/draft', async (req, res) => {
     return res.json({
       ok: true,
       draft: {
-        user_id: row.user_id,
-        nickname: row.nickname,
-        age: row.age,
-        gender: row.gender,
-        occupation: row.occupation,
-        education: row.education,
-        university: row.university,
-        hometown: row.hometown,
-        residence: row.residence,
-        personality: row.personality,
-        income: row.income,
-        atmosphere: row.atmosphere,
-        photo_url: row.draft_photo_url,
-        photo_pathname: row.draft_photo_pathname,
+        draft_id: Number(row.user_id),
+        nickname: row.nickname ?? null,
+        age: row.age ?? null,
+        gender: row.gender ?? null,
+        occupation: row.occupation ?? null,
+        education: row.education ?? null,
+        university: row.university ?? null,
+        hometown: row.hometown ?? null,
+        residence: row.residence ?? null,
+        personality: row.personality ?? null,
+        income: row.income ?? null,
+        atmosphere: row.atmosphere ?? null,
+        photo_url: row.draft_photo_url ?? null,
+        photo_pathname: row.draft_photo_pathname ?? null,
         created_at: row.created_at,
         updated_at: row.updated_at,
       },
@@ -223,7 +375,10 @@ router.get('/draft', async (req, res) => {
   }
 });
 
-/** ===== 新：PUT /api/profile/draft（仮保存） ===== */
+/**
+ * PUT /api/profile/draft
+ * - 仮保存（緩め）
+ */
 router.put('/draft', async (req, res) => {
   try {
     const token = readBearer(req);
@@ -238,99 +393,101 @@ router.put('/draft', async (req, res) => {
     const uid = await resolveUserIdFromClaims(claims, db);
     if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
 
-    // terms check（方針維持：draftでも弾く）
-    const cur = await getCurrentTerms(db);
-    if (cur) {
-      const acc = await getLatestAcceptance(db, uid);
-      const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
-      if (needs) {
-        return res.status(412).json({
-          error: 'terms_not_accepted',
-          currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
-        });
+    // terms check（仮保存でも同じ方針で）
+    try {
+      const cur = await getCurrentTerms(db);
+      if (cur) {
+        const acc = await getLatestAcceptance(db, uid);
+        const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
+        if (needs) {
+          return res.status(412).json({
+            error: 'terms_not_accepted',
+            currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
+          });
+        }
       }
+    } catch (e) {
+      console.warn('[profile:draft:put] terms check failed; allowing draft save', e);
     }
 
-    const b = req.body || {};
+    const body = req.body || {};
+    const v = validateDraftBody(body);
+    if (!v.ok) return res.status(400).json({ error: v.error });
 
-    await db.query(
+    // 数値は null or number に寄せる（DB型に合わせる）
+    const age = body.age == null || body.age === '' ? null : Number(body.age);
+    const income = body.income == null || body.income === '' ? null : Number(body.income);
+
+    const r = await db.query(
       `
       INSERT INTO profile_drafts (
         user_id,
         nickname, age, gender, occupation,
         education, university, hometown, residence,
         personality, income, atmosphere,
-        created_at, updated_at
+        updated_at
       ) VALUES (
         $1,
         $2, $3, $4, $5,
         $6, $7, $8, $9,
         $10, $11, $12,
-        now(), now()
+        now()
       )
       ON CONFLICT (user_id) DO UPDATE SET
-        nickname = EXCLUDED.nickname,
-        age = EXCLUDED.age,
-        gender = EXCLUDED.gender,
-        occupation = EXCLUDED.occupation,
-        education = EXCLUDED.education,
-        university = EXCLUDED.university,
-        hometown = EXCLUDED.hometown,
-        residence = EXCLUDED.residence,
-        personality = EXCLUDED.personality,
-        income = EXCLUDED.income,
-        atmosphere = EXCLUDED.atmosphere,
+        nickname   = COALESCE(EXCLUDED.nickname, profile_drafts.nickname),
+        age        = COALESCE(EXCLUDED.age, profile_drafts.age),
+        gender     = COALESCE(EXCLUDED.gender, profile_drafts.gender),
+        occupation = COALESCE(EXCLUDED.occupation, profile_drafts.occupation),
+        education  = COALESCE(EXCLUDED.education, profile_drafts.education),
+        university = COALESCE(EXCLUDED.university, profile_drafts.university),
+        hometown   = COALESCE(EXCLUDED.hometown, profile_drafts.hometown),
+        residence  = COALESCE(EXCLUDED.residence, profile_drafts.residence),
+        personality= COALESCE(EXCLUDED.personality, profile_drafts.personality),
+        income     = COALESCE(EXCLUDED.income, profile_drafts.income),
+        atmosphere = COALESCE(EXCLUDED.atmosphere, profile_drafts.atmosphere),
         updated_at = now()
-      `,
-      [
-        uid,
-        b.nickname ?? null,
-        b.age ?? null,
-        b.gender ?? null,
-        b.occupation ?? null,
-        b.education ?? null,
-        b.university ?? null,
-        b.hometown ?? null,
-        b.residence ?? null,
-        b.personality ?? null,
-        b.income ?? null,
-        b.atmosphere ?? null,
-      ],
-    );
-
-    const d = await db.query(
-      `
-      SELECT
+      RETURNING
         user_id,
         nickname, age, gender, occupation,
         education, university, hometown, residence,
         personality, income, atmosphere,
         draft_photo_url, draft_photo_pathname,
         created_at, updated_at
-      FROM profile_drafts
-      WHERE user_id = $1
       `,
-      [uid],
+      [
+        uid,
+        body.nickname ?? null,
+        age,
+        body.gender ?? null,
+        body.occupation ?? null,
+        body.education ?? null,
+        body.university ?? null,
+        body.hometown ?? null,
+        body.residence ?? null,
+        body.personality ?? null,
+        income,
+        body.atmosphere ?? null,
+      ],
     );
 
-    const row = d.rows[0];
+    const row = r.rows[0];
     return res.json({
       ok: true,
       draft: {
-        user_id: row.user_id,
-        nickname: row.nickname,
-        age: row.age,
-        gender: row.gender,
-        occupation: row.occupation,
-        education: row.education,
-        university: row.university,
-        hometown: row.hometown,
-        residence: row.residence,
-        personality: row.personality,
-        income: row.income,
-        atmosphere: row.atmosphere,
-        photo_url: row.draft_photo_url,
-        photo_pathname: row.draft_photo_pathname,
+        draft_id: Number(row.user_id),
+        nickname: row.nickname ?? null,
+        age: row.age ?? null,
+        gender: row.gender ?? null,
+        occupation: row.occupation ?? null,
+        education: row.education ?? null,
+        university: row.university ?? null,
+        hometown: row.hometown ?? null,
+        residence: row.residence ?? null,
+        personality: row.personality ?? null,
+        income: row.income ?? null,
+        atmosphere: row.atmosphere ?? null,
+        photo_url: row.draft_photo_url ?? null,
+        photo_pathname: row.draft_photo_pathname ?? null,
         created_at: row.created_at,
         updated_at: row.updated_at,
       },
@@ -343,14 +500,14 @@ router.put('/draft', async (req, res) => {
 
 /**
  * POST /api/profile/confirm
- * - draft入力 + draft_photo_url を user_profiles に反映して確定
- * - 成功後、profile_drafts を削除（途中離脱は cancel で削除）
+ * - profile_drafts の内容 + draft_photo_url を user_profiles に反映
+ * - 成功したら profile_drafts を削除
  */
 router.post('/confirm', async (req, res) => {
-  try {
-    const token = readBearer(req);
-    if (!token) return res.status(401).json({ error: 'unauthenticated' });
+  const token = readBearer(req);
+  if (!token) return res.status(401).json({ error: 'unauthenticated' });
 
+  try {
     const verified = await verifyAccess(token);
     const claims = normalizeClaims(verified);
 
@@ -360,7 +517,7 @@ router.post('/confirm', async (req, res) => {
     const uid = await resolveUserIdFromClaims(claims, db);
     if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
 
-    // terms check（確定なので必須）
+    // terms check（確定なので必須扱い）
     const cur = await getCurrentTerms(db);
     if (cur) {
       const acc = await getLatestAcceptance(db, uid);
@@ -377,7 +534,6 @@ router.post('/confirm', async (req, res) => {
     try {
       await client.query('BEGIN');
 
-      // draft をロック
       const d = await client.query(
         `
         SELECT
@@ -397,48 +553,41 @@ router.post('/confirm', async (req, res) => {
         return res.status(412).json({ error: 'draft_required' });
       }
 
-      const row = d.rows[0];
-      const nf = normalizeFinalPayload(row);
+      const nf = normalizeFinalPayload(d.rows[0]);
       if (!nf.ok) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: nf.error });
       }
-      const data = nf.data;
 
-      const draftPhotoUrl: string | null = row.draft_photo_url ?? null;
+      const data = nf.data; // <- ここで確定的に束縛（TS的にも undefined にならない）
 
-      // user_profiles に確定反映（photo_url は draft_photo_url を採用）
       await client.query(
         `
         INSERT INTO user_profiles (
-          user_id,
-          nickname, age, gender, occupation,
+          user_id, nickname, age, gender, occupation,
           education, university, hometown, residence,
           personality, income, atmosphere,
-          photo_url, photo_masked_url,
-          created_at, updated_at
+          photo_url, photo_masked_url
         ) VALUES (
-          $1,
-          $2, $3, $4, $5,
+          $1, $2, $3, $4, $5,
           $6, $7, $8, $9,
           $10, $11, $12,
-          $13, COALESCE((SELECT photo_masked_url FROM user_profiles WHERE user_id = $1), NULL),
-          now(), now()
+          $13, NULL
         )
         ON CONFLICT (user_id) DO UPDATE SET
-          nickname = EXCLUDED.nickname,
-          age = EXCLUDED.age,
-          gender = EXCLUDED.gender,
-          occupation = EXCLUDED.occupation,
-          education = EXCLUDED.education,
-          university = EXCLUDED.university,
-          hometown = EXCLUDED.hometown,
-          residence = EXCLUDED.residence,
-          personality = EXCLUDED.personality,
-          income = EXCLUDED.income,
-          atmosphere = EXCLUDED.atmosphere,
+          nickname = COALESCE(EXCLUDED.nickname, user_profiles.nickname),
+          age = COALESCE(EXCLUDED.age, user_profiles.age),
+          gender = COALESCE(EXCLUDED.gender, user_profiles.gender),
+          occupation = COALESCE(EXCLUDED.occupation, user_profiles.occupation),
+          education = COALESCE(EXCLUDED.education, user_profiles.education),
+          university = COALESCE(EXCLUDED.university, user_profiles.university),
+          hometown = COALESCE(EXCLUDED.hometown, user_profiles.hometown),
+          residence = COALESCE(EXCLUDED.residence, user_profiles.residence),
+          personality = COALESCE(EXCLUDED.personality, user_profiles.personality),
+          income = COALESCE(EXCLUDED.income, user_profiles.income),
+          atmosphere = COALESCE(EXCLUDED.atmosphere, user_profiles.atmosphere),
           photo_url = COALESCE(EXCLUDED.photo_url, user_profiles.photo_url),
-          updated_at = now()
+          updated_at = NOW()
         `,
         [
           uid,
@@ -453,16 +602,14 @@ router.post('/confirm', async (req, res) => {
           data.personality,
           data.income,
           data.atmosphere,
-          draftPhotoUrl,
+          data.photo_url, // draft_photo_url を本採用（nullなら既存維持）
         ],
       );
 
-      // draft 削除（確定後は不要）
-      await client.query(`DELETE FROM profile_drafts WHERE user_id = $1`, [uid]);
+      await client.query('DELETE FROM profile_drafts WHERE user_id = $1', [uid]);
 
       await client.query('COMMIT');
 
-      // 返却
       const r = await db.query(
         `SELECT
            u.id, u.line_user_id, u.payment_method_set,
@@ -481,7 +628,7 @@ router.post('/confirm', async (req, res) => {
       await client.query('ROLLBACK').catch(() => {});
       throw e;
     } finally {
-      (client as any).release?.();
+      client.release();
     }
   } catch (e: any) {
     console.error('[profile/confirm]', e?.message || e);
@@ -491,8 +638,7 @@ router.post('/confirm', async (req, res) => {
 
 /**
  * POST /api/profile/cancel
- * - draft を破棄
- * - draft_photo_pathname があれば Blob も削除
+ * - draft を破棄（写真のBlob削除は blob.ts 側で実施するので pathname を返す）
  */
 router.post('/cancel', async (req, res) => {
   try {
@@ -512,20 +658,11 @@ router.post('/cancel', async (req, res) => {
       `SELECT draft_photo_pathname FROM profile_drafts WHERE user_id = $1`,
       [uid],
     );
-    const pathname: string | null = d.rows[0]?.draft_photo_pathname ?? null;
+    const pathname = d.rows[0]?.draft_photo_pathname ?? null;
 
     await db.query(`DELETE FROM profile_drafts WHERE user_id = $1`, [uid]);
 
-    // Blob 削除（失敗しても cancel は成立させる）
-    if (pathname) {
-      try {
-        await del(pathname);
-      } catch (e) {
-        console.warn('[profile/cancel] blob del failed (ignored):', e);
-      }
-    }
-
-    return res.json({ ok: true, cancelled: true });
+    return res.json({ ok: true, cancelled: true, draft_photo_pathname: pathname });
   } catch (e: any) {
     console.error('[profile/cancel]', e?.message || e);
     return res.status(500).json({ error: 'server_error' });
