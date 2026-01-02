@@ -9,7 +9,7 @@ const multer_1 = __importDefault(require("multer"));
 const blob_1 = require("@vercel/blob");
 const db_1 = require("../db");
 const router = (0, express_1.Router)();
-// ===== multer (memory) =====
+/** ===== multer (memory) ===== */
 const upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
@@ -31,77 +31,26 @@ function extFromMime(mime) {
         return 'webp';
     return null;
 }
-async function ensureProfileExists(db, userId) {
-    // 既存(A設計)用：profileが存在しない状態ではアップロードさせない（孤児Blob防止）
-    const r = await db.query(`SELECT 1 FROM user_profiles WHERE user_id = $1 LIMIT 1`, [userId]);
-    return (r.rowCount ?? 0) > 0;
+async function ensureDraftExists(db, userId) {
+    // draft が無ければ空で作る（写真画面でアップロードできるように）
+    await db.query(`
+    INSERT INTO user_profile_drafts (user_id, draft, created_at, updated_at)
+    VALUES ($1, '{}'::jsonb, now(), now())
+    ON CONFLICT (user_id) DO UPDATE SET
+      updated_at = now()
+    `, [userId]);
 }
-function mustUserId(req) {
-    const raw = req.userId;
-    const n = Number(raw);
-    if (!n || !Number.isFinite(n))
-        return null;
-    return n;
-}
-/**
- * 既存：POST /api/blob/profile-photo（A設計）
- * - multipart/form-data (field name: "file")
- * - 認証: app.ts で requireAuth を噛ませて req.userId が入っている前提
- * - プロフィール未作成なら 412 profile_required（Blobゴミ発生を防ぐ）
- * - 成功すると user_profiles.photo_url を更新して返す
- */
-router.post('/profile-photo', upload.single('file'), async (req, res) => {
-    try {
-        const userId = mustUserId(req);
-        if (!userId)
-            return res.status(401).json({ error: 'unauthorized' });
-        const db = db_1.pool;
-        const okProfile = await ensureProfileExists(db, userId);
-        if (!okProfile)
-            return res.status(412).json({ error: 'profile_required' });
-        const f = req.file;
-        if (!f)
-            return res.status(400).json({ error: 'file_required' });
-        const ext = extFromMime(f.mimetype);
-        if (!ext)
-            return res.status(400).json({ error: 'invalid_file_type' });
-        const key = `profile-photos/${userId}/${Date.now()}-${rand(12)}.${ext}`;
-        const uploaded = await (0, blob_1.put)(key, f.buffer, {
-            access: 'public',
-            contentType: f.mimetype,
-            addRandomSuffix: false,
-        });
-        await db.query(`
-      UPDATE user_profiles
-      SET photo_url = $2,
-          updated_at = NOW()
-      WHERE user_id = $1
-      `, [userId, uploaded.url]);
-        return res.json({
-            ok: true,
-            url: uploaded.url,
-            pathname: uploaded.pathname,
-        });
-    }
-    catch (e) {
-        console.error('[blob/profile-photo]', e);
-        return res.status(500).json({ error: e?.message || 'server_error' });
-    }
-});
-/* =========================================================
-   追加：draftフロー用 “仮写真アップロード”
-   ========================================================= */
 /**
  * POST /api/blob/draft-photo
  * - multipart/form-data (field name: "file")
- * - 認証: requireAuth
+ * - 認証: app.ts で requireAuth により req.userId が入っている前提
  * - user_profile_drafts に photo_tmp_url / photo_tmp_pathname を保存
- * - すでに仮写真がある場合は “古い仮写真Blobを削除” して入れ替える（孤児防止）
  */
 router.post('/draft-photo', upload.single('file'), async (req, res) => {
     try {
-        const userId = mustUserId(req);
-        if (!userId)
+        const userIdRaw = req.userId;
+        const userId = Number(userIdRaw);
+        if (!userId || !Number.isFinite(userId))
             return res.status(401).json({ error: 'unauthorized' });
         const db = db_1.pool;
         const f = req.file;
@@ -110,39 +59,32 @@ router.post('/draft-photo', upload.single('file'), async (req, res) => {
         const ext = extFromMime(f.mimetype);
         if (!ext)
             return res.status(400).json({ error: 'invalid_file_type' });
-        // 既存の draft の仮写真があれば先に消す（pathnameベース）
+        // draft 行を確実に用意
+        await ensureDraftExists(db, userId);
+        // 既存tmpがあれば pathname を返しても良いが、ここでは「上書き」運用にする
+        // （不要なBlobが増えるのを防ぐため、アップロード前に既存tmpを消す）
         const prev = await db.query(`SELECT photo_tmp_pathname FROM user_profile_drafts WHERE user_id = $1`, [userId]);
-        const prevPath = prev.rows[0]?.photo_tmp_pathname ?? null;
-        // アップロード
+        const prevPathname = prev.rows[0]?.photo_tmp_pathname ?? null;
+        // Blob アップロード
         const key = `profile-drafts/${userId}/${Date.now()}-${rand(12)}.${ext}`;
         const uploaded = await (0, blob_1.put)(key, f.buffer, {
             access: 'public',
             contentType: f.mimetype,
             addRandomSuffix: false,
         });
-        // DBに仮写真を記録（draft行がなければ作る）
+        // DB更新
         await db.query(`
-      INSERT INTO user_profile_drafts (user_id, draft, photo_tmp_url, photo_tmp_pathname, created_at, updated_at)
-      VALUES ($1, '{}'::jsonb, $2, $3, now(), now())
-      ON CONFLICT (user_id) DO UPDATE SET
-        photo_tmp_url = EXCLUDED.photo_tmp_url,
-        photo_tmp_pathname = EXCLUDED.photo_tmp_pathname,
-        updated_at = now()
+      UPDATE user_profile_drafts
+      SET photo_tmp_url = $2,
+          photo_tmp_pathname = $3,
+          updated_at = now()
+      WHERE user_id = $1
       `, [userId, uploaded.url, uploaded.pathname]);
-        // 旧仮写真Blobを削除（失敗しても致命ではない）
-        if (prevPath && typeof prevPath === 'string' && prevPath.startsWith(`profile-drafts/${userId}/`)) {
-            try {
-                await (0, blob_1.del)(prevPath);
-            }
-            catch (e) {
-                console.warn('[blob/draft-photo] failed to delete previous draft blob:', prevPath, e);
-            }
+        // 既存tmpがあれば削除（失敗してもUXは止めない）
+        if (prevPathname && prevPathname.startsWith(`profile-drafts/${userId}/`)) {
+            (0, blob_1.del)(prevPathname).catch(() => { });
         }
-        return res.json({
-            ok: true,
-            url: uploaded.url,
-            pathname: uploaded.pathname,
-        });
+        return res.json({ ok: true, url: uploaded.url, pathname: uploaded.pathname });
     }
     catch (e) {
         console.error('[blob/draft-photo]', e);
@@ -150,46 +92,37 @@ router.post('/draft-photo', upload.single('file'), async (req, res) => {
     }
 });
 /**
- * POST /api/blob/draft-photo/delete
+ * DELETE /api/blob/draft-photo
  * body: { pathname: string }
- * - 認証: requireAuth
- * - 自分の `profile-drafts/${userId}/` 配下のみ削除可（安全）
- * - DB の photo_tmp_* もクリア
+ * - draftのtmp写真を削除（本人のprefixチェック）
  */
-router.post('/draft-photo/delete', async (req, res) => {
+router.delete('/draft-photo', async (req, res) => {
     try {
-        const userId = mustUserId(req);
-        if (!userId)
+        const userIdRaw = req.userId;
+        const userId = Number(userIdRaw);
+        if (!userId || !Number.isFinite(userId))
             return res.status(401).json({ error: 'unauthorized' });
         const pathname = req.body?.pathname;
-        if (typeof pathname !== 'string' || !pathname) {
+        if (!pathname || typeof pathname !== 'string')
             return res.status(400).json({ error: 'pathname_required' });
-        }
-        // 自分の領域以外は削除させない
+        // ✅ 本人の領域だけ削除可能
         const prefix = `profile-drafts/${userId}/`;
-        if (!pathname.startsWith(prefix)) {
+        if (!pathname.startsWith(prefix))
             return res.status(403).json({ error: 'forbidden' });
-        }
-        try {
-            await (0, blob_1.del)(pathname);
-        }
-        catch (e) {
-            // 既に消えててもOK扱いにする（冪等）
-            console.warn('[blob/draft-photo/delete] del failed (ignore):', e);
-        }
-        // DB の仮写真をクリア（一致する場合のみ）
-        await db_1.pool.query(`
+        await (0, blob_1.del)(pathname);
+        // DB側もクリア（あれば）
+        const db = db_1.pool;
+        await db.query(`
       UPDATE user_profile_drafts
       SET photo_tmp_url = NULL,
           photo_tmp_pathname = NULL,
           updated_at = now()
-      WHERE user_id = $1
-        AND photo_tmp_pathname = $2
+      WHERE user_id = $1 AND photo_tmp_pathname = $2
       `, [userId, pathname]);
         return res.json({ ok: true, deleted: true });
     }
     catch (e) {
-        console.error('[blob/draft-photo/delete]', e);
+        console.error('[blob/draft-photo:delete]', e);
         return res.status(500).json({ error: e?.message || 'server_error' });
     }
 });
