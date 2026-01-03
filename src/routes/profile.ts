@@ -37,34 +37,48 @@ async function resolveUserIdFromClaims(claims: any, db: Pool): Promise<number | 
   return null;
 }
 
+/** terms.ts と同じ「現在の規約」判定 */
 async function getCurrentTerms(db: Pool) {
   const r = await db.query(
     `
-    SELECT id, version, published_at
-    FROM terms_versions
-    WHERE is_active = true
-    ORDER BY published_at DESC, id DESC
+    SELECT id, version, title, body_md, effective_at
+    FROM terms_documents
+    WHERE effective_at <= now()
+    ORDER BY effective_at DESC
     LIMIT 1
     `,
   );
   return r.rows[0] ?? null;
 }
-async function getLatestAcceptance(db: Pool, userId: number) {
+
+/** terms.ts と同じ「同意済み」判定 */
+async function requireAcceptedTerms(db: Pool, userId: number) {
+  const terms = await getCurrentTerms(db);
+  if (!terms) return; // 規約が無いなら accepted 扱い（terms.ts と同じ）
+
   const r = await db.query(
     `
-    SELECT
-      tv.id AS terms_version_id,
-      tv.version,
-      uta.accepted_at
-    FROM user_terms_acceptances uta
-    JOIN terms_versions tv ON tv.id = uta.terms_version_id
-    WHERE uta.user_id = $1
-    ORDER BY uta.accepted_at DESC
+    SELECT 1
+    FROM user_terms_acceptances
+    WHERE user_id = $1 AND terms_id = $2
     LIMIT 1
     `,
-    [userId],
+    [userId, terms.id],
   );
-  return r.rows[0] ?? null;
+
+  const accepted = (r.rowCount ?? 0) > 0;
+  if (!accepted) {
+    return {
+      ok: false as const,
+      status: 412,
+      payload: {
+        error: 'terms_not_accepted',
+        currentTerms: { id: Number(terms.id), version: terms.version, effective_at: terms.effective_at },
+      },
+    };
+  }
+
+  return { ok: true as const };
 }
 
 /** draft: ゆるいバリデーション（型だけ） */
@@ -95,7 +109,6 @@ function validateDraftBody(b: any) {
     if (typeof v !== 'string') return { ok: false as const, error: `invalid_${k}` as const };
   }
 
-  // draft側で写真が来る場合もある（blob側が基本だが保険）
   if ((b as any).draft_photo_url != null && typeof (b as any).draft_photo_url !== 'string') {
     return { ok: false as const, error: 'invalid_draft_photo_url' as const };
   }
@@ -107,20 +120,36 @@ function validateDraftBody(b: any) {
 }
 
 /** confirm用に正規化（確定時は nickname 必須） */
-function normalizeFinalPayload(d: any) {
+type NormalizedFinal =
+  | { ok: true; data: {
+      nickname: string;
+      age: number | null;
+      gender: string | null;
+      occupation: string | null;
+      education: string | null;
+      university: string | null;
+      hometown: string | null;
+      residence: string | null;
+      personality: string | null;
+      income: number | null;
+      atmosphere: string | null;
+    } }
+  | { ok: false; error: string };
+
+function normalizeFinalPayload(d: any): NormalizedFinal {
   const nickname = typeof d?.nickname === 'string' ? d.nickname.trim() : '';
-  if (!nickname) return { ok: false as const, error: 'nickname_required' as const };
+  if (!nickname) return { ok: false, error: 'nickname_required' };
 
   const ageRaw = d?.age;
   const age = ageRaw == null || ageRaw === '' ? null : Number(ageRaw);
   if (age != null && !(Number.isInteger(age) && age >= 18 && age <= 120)) {
-    return { ok: false as const, error: 'invalid_age' as const };
+    return { ok: false, error: 'invalid_age' };
   }
 
   const incomeRaw = d?.income;
   const income = incomeRaw == null || incomeRaw === '' ? null : Number(incomeRaw);
   if (income != null && !(Number.isInteger(income) && income >= 0 && income <= 10_000)) {
-    return { ok: false as const, error: 'invalid_income' as const };
+    return { ok: false, error: 'invalid_income' };
   }
 
   const gender = d?.gender ?? null;
@@ -134,11 +163,11 @@ function normalizeFinalPayload(d: any) {
 
   const strOk = (v: any) => v == null || typeof v === 'string';
   if (![gender, occupation, education, university, hometown, residence, personality, atmosphere].every(strOk)) {
-    return { ok: false as const, error: 'invalid_string_field' as const };
+    return { ok: false, error: 'invalid_string_field' };
   }
 
   return {
-    ok: true as const,
+    ok: true,
     data: {
       nickname,
       age,
@@ -155,7 +184,7 @@ function normalizeFinalPayload(d: any) {
   };
 }
 
-/** ===== 既存：GET /api/profile（確定プロフィール） ===== */
+/** ===== GET /api/profile（確定プロフィール） ===== */
 router.get('/', async (req, res) => {
   try {
     const token = readBearer(req);
@@ -191,7 +220,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-/** ===== 既存：PUT /api/profile（確定プロフィール upsert） ===== */
+/** ===== PUT /api/profile（確定プロフィール upsert） ===== */
 router.put('/', async (req, res) => {
   try {
     const token = readBearer(req);
@@ -206,22 +235,9 @@ router.put('/', async (req, res) => {
     const uid = await resolveUserIdFromClaims(claims, db);
     if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
 
-    // terms check
-    try {
-      const cur = await getCurrentTerms(db);
-      if (cur) {
-        const acc = await getLatestAcceptance(db, uid);
-        const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
-        if (needs) {
-          return res.status(412).json({
-            error: 'terms_not_accepted',
-            currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
-          });
-        }
-      }
-    } catch (e) {
-      console.warn('[profile:put] terms check failed; allowing update', e);
-    }
+    // ✅ terms check（terms.ts と完全一致）
+    const t = await requireAcceptedTerms(db, uid);
+    if (t && !t.ok) return res.status(t.status).json(t.payload);
 
     const {
       nickname,
@@ -320,7 +336,7 @@ router.put('/', async (req, res) => {
 });
 
 /* =========================================================
-   Draftフロー（profile_drafts テーブル版）
+   Draftフロー（public.profile_drafts）
    ========================================================= */
 
 /**
@@ -364,7 +380,6 @@ router.get('/draft', async (req, res) => {
 
 /**
  * PUT /api/profile/draft
- * - 部分更新（null/undefinedは “更新しない” 仕様に寄せる）
  */
 router.put('/draft', async (req, res) => {
   try {
@@ -380,22 +395,9 @@ router.put('/draft', async (req, res) => {
     const uid = await resolveUserIdFromClaims(claims, db);
     if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
 
-    // terms check（方針：draftでもブロックする）
-    try {
-      const cur = await getCurrentTerms(db);
-      if (cur) {
-        const acc = await getLatestAcceptance(db, uid);
-        const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
-        if (needs) {
-          return res.status(412).json({
-            error: 'terms_not_accepted',
-            currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
-          });
-        }
-      }
-    } catch (e) {
-      console.warn('[profile:draft:put] terms check failed; allowing draft save', e);
-    }
+    // ✅ terms check（draftでもブロックする方針）
+    const t = await requireAcceptedTerms(db, uid);
+    if (t && !t.ok) return res.status(t.status).json(t.payload);
 
     const body = req.body || {};
     const v = validateDraftBody(body);
@@ -485,9 +487,6 @@ router.put('/draft', async (req, res) => {
 
 /**
  * POST /api/profile/confirm
- * - profile_drafts を user_profiles に反映
- * - 写真は draft_photo_url をそのまま photo_url に採用（Blob移動なし）
- * - 確定後、profile_drafts は削除
  */
 router.post('/confirm', async (req, res) => {
   const token = readBearer(req);
@@ -503,18 +502,9 @@ router.post('/confirm', async (req, res) => {
     const uid = await resolveUserIdFromClaims(claims, db);
     if (uid == null) return res.status(401).json({ error: 'unauthenticated' });
 
-    // terms check（確定なので必須）
-    const cur = await getCurrentTerms(db);
-    if (cur) {
-      const acc = await getLatestAcceptance(db, uid);
-      const needs = !acc || Number(acc.terms_version_id) !== Number(cur.id);
-      if (needs) {
-        return res.status(412).json({
-          error: 'terms_not_accepted',
-          currentTerms: { id: Number(cur.id), version: cur.version, published_at: cur.published_at },
-        });
-      }
-    }
+    // ✅ terms check（確定なので必須）
+    const t = await requireAcceptedTerms(db, uid);
+    if (t && !t.ok) return res.status(t.status).json(t.payload);
 
     const client = await db.connect();
     try {
@@ -545,11 +535,10 @@ router.post('/confirm', async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: nf.error });
       }
-      const data = nf.data; // <- ここで確定的に存在
+      const data = nf.data;
 
       const photoUrl: string | null = row.draft_photo_url ?? null;
 
-      // user_profiles upsert（nickname NOT NULL 対応）
       await client.query(
         `
         INSERT INTO public.user_profiles (
@@ -596,7 +585,6 @@ router.post('/confirm', async (req, res) => {
         ],
       );
 
-      // draft削除
       await client.query(`DELETE FROM public.profile_drafts WHERE user_id = $1`, [uid]);
 
       await client.query('COMMIT');
@@ -629,7 +617,6 @@ router.post('/confirm', async (req, res) => {
 
 /**
  * POST /api/profile/cancel
- * - draft破棄 + draft写真Blobも削除（pathnameがあれば）
  */
 router.post('/cancel', async (req, res) => {
   const token = readBearer(req);
@@ -654,7 +641,6 @@ router.post('/cancel', async (req, res) => {
 
     await db.query(`DELETE FROM public.profile_drafts WHERE user_id = $1`, [uid]);
 
-    // blob削除（失敗してもキャンセル自体は成功にする）
     if (pathname) {
       try {
         await delBlob(pathname);
