@@ -416,8 +416,26 @@
       </tr>
     `).join("");
 
+    // ✅ Photo (prefer masked)
+    const photoUrl = u.photo_masked_url || u.photo_url || "";
+    const photoHtml = photoUrl ? `
+      <div style="display:flex; align-items:center; gap:12px; margin: 8px 0 10px;">
+        <img
+          src="${esc(photoUrl)}"
+          alt="photo"
+          style="width:72px; height:72px; border-radius:999px; object-fit:cover; background:#f2f2f2;"
+          onerror="this.style.display='none';"
+        />
+        <div class="muted" style="font-size:12px;">photo</div>
+      </div>
+    ` : `
+      <div class="muted" style="margin: 8px 0 10px; font-size:12px;">photo: —</div>
+    `;
+
     $("drawerBody").innerHTML = `
       <div>
+        ${photoHtml}
+
         <div class="row" style="margin: 0;">
           <span class="pill ${genderClass}">${esc(u.gender || "-")}</span>
           <span>Age: <b>${esc(age)}</b></span>

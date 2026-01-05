@@ -26,6 +26,11 @@ function getDb(req: any): Pool {
  * GET /admin/users/:userId
  * - ユーザ基本 + プロフィール（一覧より詳細）
  */
+/**
+ * GET /admin/users/:userId
+ * - ユーザ基本 + プロフィール（一覧より詳細）
+ * - ✅ photo_url / photo_masked_url を返す
+ */
 router.get("/users/:userId", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
@@ -44,7 +49,9 @@ router.get("/users/:userId", async (req, res) => {
         p.nickname,
         p.gender,
         p.age,
-        p.verified_age
+        p.verified_age,
+        p.photo_url,
+        p.photo_masked_url
       FROM users u
       LEFT JOIN user_profiles p ON p.user_id = u.id
       WHERE u.id = $1
@@ -63,10 +70,15 @@ router.get("/users/:userId", async (req, res) => {
         user_id: Number(r.user_id),
         line_user_id: r.line_user_id,
         created_at: r.created_at,
+
         nickname: r.nickname,
         gender: r.gender,
         age: r.age == null ? null : Number(r.age),
         verified_age: Boolean(r.verified_age),
+
+        // ✅ 追加
+        photo_url: r.photo_url ?? null,
+        photo_masked_url: r.photo_masked_url ?? null,
       },
     });
   } catch (e: any) {
