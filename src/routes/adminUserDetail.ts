@@ -22,23 +22,27 @@ function getDb(req: any): Pool {
   return db;
 }
 
-/**
- * GET /admin/users/:userId
- * - ユーザ基本 + プロフィール（一覧より詳細）
- */
+function parseUserId(req: any, res: any): number | null {
+  const userId = Number(req.params.userId);
+  if (!Number.isFinite(userId)) {
+    res.status(400).json({ error: "invalid userId" });
+    return null;
+  }
+  return userId;
+}
+
 /**
  * GET /admin/users/:userId
  * - ユーザ基本 + プロフィール（一覧より詳細）
  * - ✅ photo_url / photo_masked_url を返す
+ * - ✅ kyc_verified / kyc_verified_at を返す
  */
 router.get("/users/:userId", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
   const db = getDb(req);
-  const userId = Number(req.params.userId);
-  if (!Number.isFinite(userId)) {
-    return res.status(400).json({ error: "invalid userId" });
-  }
+  const userId = parseUserId(req, res);
+  if (userId == null) return;
 
   try {
     const sql = `
@@ -46,12 +50,17 @@ router.get("/users/:userId", async (req, res) => {
         u.id          AS user_id,
         u.line_user_id,
         u.created_at,
+
         p.nickname,
         p.gender,
         p.age,
         p.verified_age,
+
         p.photo_url,
-        p.photo_masked_url
+        p.photo_masked_url,
+
+        p.kyc_verified,
+        p.kyc_verified_at
       FROM users u
       LEFT JOIN user_profiles p ON p.user_id = u.id
       WHERE u.id = $1
@@ -71,14 +80,16 @@ router.get("/users/:userId", async (req, res) => {
         line_user_id: r.line_user_id,
         created_at: r.created_at,
 
-        nickname: r.nickname,
-        gender: r.gender,
+        nickname: r.nickname ?? null,
+        gender: r.gender ?? null,
         age: r.age == null ? null : Number(r.age),
         verified_age: Boolean(r.verified_age),
 
-        // ✅ 追加
         photo_url: r.photo_url ?? null,
         photo_masked_url: r.photo_masked_url ?? null,
+
+        kyc_verified: Boolean(r.kyc_verified),
+        kyc_verified_at: r.kyc_verified_at ?? null,
       },
     });
   } catch (e: any) {
@@ -88,19 +99,59 @@ router.get("/users/:userId", async (req, res) => {
 });
 
 /**
+ * POST /admin/users/:userId/kyc
+ * - 管理画面からKYC済みフラグをON/OFF
+ * body: { verified: boolean }
+ */
+router.post("/users/:userId/kyc", async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+
+  const db = getDb(req);
+  const userId = parseUserId(req, res);
+  if (userId == null) return;
+
+  const verified = (req.body || {})?.verified;
+  if (typeof verified !== "boolean") {
+    return res.status(400).json({ error: "invalid_request", hint: "body.verified must be boolean" });
+  }
+
+  try {
+    // user_profiles が無いユーザーに対しては 412（プロフィール後にKYCの前提）
+    const exists = await db.query(`SELECT 1 FROM user_profiles WHERE user_id = $1 LIMIT 1`, [userId]);
+    if ((exists.rowCount ?? 0) === 0) {
+      return res.status(412).json({ error: "profile_required" });
+    }
+
+    await db.query(
+      `
+      UPDATE user_profiles
+      SET
+        kyc_verified = $2,
+        kyc_verified_at = CASE WHEN $2 THEN now() ELSE NULL END,
+        updated_at = now()
+      WHERE user_id = $1
+      `,
+      [userId, verified]
+    );
+
+    return res.json({ ok: true, userId, kyc_verified: verified });
+  } catch (e: any) {
+    console.error("[admin/users/:userId/kyc] error", e);
+    return res.status(500).json({ error: e?.message || "server_error" });
+  }
+});
+
+/**
  * GET /admin/users/:userId/slots?limit=200
  * - ✅ スロット単位の処理ステータスを返す（user_setup_slots.status）
- * - 既存の slots[].status を "slot_status" に差し替える（デグレ回避）
- * - 親の status は setup_status として返す（必要なら）
+ * - 既存の slots[].status を slot_status に差し替え（デグレ回避）
  */
 router.get("/users/:userId/slots", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
   const db = getDb(req);
-  const userId = Number(req.params.userId);
-  if (!Number.isFinite(userId)) {
-    return res.status(400).json({ error: "invalid userId" });
-  }
+  const userId = parseUserId(req, res);
+  if (userId == null) return;
 
   const limit = Math.min(Number(req.query.limit || 200), 500);
 
@@ -128,12 +179,12 @@ router.get("/users/:userId/slots", async (req, res) => {
         s.location,
         s.cost_pref,
         s.venue_pref,
-        s.status        AS setup_status,   -- 親（参考用）
+        s.status        AS setup_status,
         s.submitted_at,
 
         sl.id           AS slot_id,
         sl.slot_dt,
-        sl.status       AS slot_status,    -- ✅ これが欲しいやつ
+        sl.status       AS slot_status,
 
         (sl.slot_dt AT TIME ZONE 'Asia/Tokyo') AS slot_jst
       FROM user_setup s
@@ -158,16 +209,15 @@ router.get("/users/:userId/slots", async (req, res) => {
         cost_pref: r.cost_pref,
         venue_pref: r.venue_pref,
 
-        // ✅ 既存互換：slots[].status は slot_status を返す（ここが最重要）
+        // ✅ 既存互換：slots[].status は slot_status
         status: r.slot_status,
 
-        // 参考: 親の状態も返す（UIで必要になったら使える）
         setup_status: r.setup_status,
 
         submitted_at: r.submitted_at,
         slot_id: Number(r.slot_id),
-        slot_dt: r.slot_dt,   // ISO (timestamptz)
-        slot_jst: r.slot_jst, // "YYYY-MM-DD HH:MM:SS" (JST)
+        slot_dt: r.slot_dt,
+        slot_jst: r.slot_jst,
       })),
     });
   } catch (e: any) {

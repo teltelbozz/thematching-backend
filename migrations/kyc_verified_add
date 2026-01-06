@@ -1,0 +1,14 @@
+BEGIN;
+
+ALTER TABLE public.user_profiles
+  ADD COLUMN IF NOT EXISTS kyc_verified boolean NOT NULL DEFAULT false;
+
+ALTER TABLE public.user_profiles
+  ADD COLUMN IF NOT EXISTS kyc_verified_at timestamptz NULL;
+
+-- 既存データは DEFAULT により false になります（念のため）
+UPDATE public.user_profiles
+SET kyc_verified = COALESCE(kyc_verified, false)
+WHERE kyc_verified IS NULL;
+
+COMMIT;
