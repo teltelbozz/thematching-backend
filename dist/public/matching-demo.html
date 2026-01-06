@@ -358,6 +358,40 @@
     if (currentUserId != null) loadUserDetail(currentUserId);
   });
 
+  // ✅ KYC toggle
+  async function toggleKyc(userId, next) {
+    const token = tokenOrAlert(); if (!token) return;
+
+    const ok = confirm(next
+      ? "このユーザーをKYC承認しますか？"
+      : "KYC承認を解除しますか？"
+    );
+    if (!ok) return;
+
+    let res;
+    try {
+      res = await fetch(`/admin/users/${userId}/kyc`, {
+        method: "POST",
+        headers: {
+          "Content-Type":"application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({ verified: !!next }),
+      });
+    } catch (e) {
+      alert(e?.message || String(e));
+      return;
+    }
+
+    if (!res.ok) {
+      alert(await res.text());
+      return;
+    }
+
+    // 再読込
+    loadUserDetail(userId);
+  }
+
   async function loadUserDetail(userId) {
     const token = tokenOrAlert(); if (!token) return;
 
@@ -403,7 +437,6 @@
     const genderClass = u.gender === "female" ? "female" : (u.gender === "male" ? "male" : "");
     const age = (u.age === 0 || u.age === "0" || u.age == null) ? "—" : u.age;
 
-    // ★ slots API の status は「user_setup_slots.status（slot_status）」が返る想定
     const pillClass = (st) => (st === "processed" ? "processed" : (st === "active" ? "active" : ""));
 
     const slotRows = slots.map(x => `
@@ -432,9 +465,36 @@
       <div class="muted" style="margin: 8px 0 10px; font-size:12px;">photo: —</div>
     `;
 
+    // ✅ KYC
+    const kycHtml = `
+      <div style="margin: 6px 0 10px;">
+        <b>KYC:</b>
+        ${u.kyc_verified ? "✅ 承認済み" : "— 未確認"}
+        ${u.kyc_verified_at ? `<div class="muted mini">${esc(fmtDateJa(u.kyc_verified_at))}</div>` : ""}
+        <div class="row" style="margin-top:8px;">
+          <button
+            class="btn-primary"
+            onclick="toggleKyc(${esc(u.user_id)}, ${u.kyc_verified ? "false" : "true"})">
+            ${u.kyc_verified ? "KYCを解除" : "KYCを承認"}
+          </button>
+        </div>
+      </div>
+    `;
+
+    const kycBtn = `
+  <div class="row" style="margin-top:8px;">
+    <button
+      class="btn-primary"
+      onclick="toggleKyc(${u.user_id}, ${!u.kyc_verified})">
+      ${u.kyc_verified ? "KYCを解除" : "KYCを承認"}
+    </button>
+  </div>
+`;
+
     $("drawerBody").innerHTML = `
       <div>
         ${photoHtml}
+        ${kycHtml}
 
         <div class="row" style="margin: 0;">
           <span class="pill ${genderClass}">${esc(u.gender || "-")}</span>
@@ -518,7 +578,6 @@
       `;
     }).join("") || `<tr><td colspan="7" class="muted">no users</td></tr>`;
 
-    // 行クリック → ドロワー
     document.querySelectorAll("tr.user-row[data-user-id]").forEach(tr => {
       tr.addEventListener("click", () => {
         const id = tr.getAttribute("data-user-id");
@@ -594,7 +653,6 @@
     const data = await res.json();
     setStatus($("resultsStatus"), `loaded ${data.count}`, "ok");
 
-    // ---- Matched Groups
     $("groupsMeta").textContent = `${(data.count ?? 0)} groups`;
 
     const renderPerson = p => `
@@ -619,7 +677,6 @@
       </tr>
     `).join("") || `<tr><td colspan="8" class="muted">no results</td></tr>`;
 
-    // ---- Unmatched Users
     const unmatched = data.unmatchedUsers || [];
     const unmatchedCount = (data.unmatchedCount != null) ? data.unmatchedCount : unmatched.length;
     $("unmatchedMeta").textContent = `${unmatchedCount} users`;
@@ -646,7 +703,6 @@
       `;
     }).join("");
 
-    // unmatched card click -> drawer
     document.querySelectorAll('#unmatchedWrap [data-user-id]').forEach(el => {
       el.addEventListener('click', () => {
         const id = el.getAttribute('data-user-id');
