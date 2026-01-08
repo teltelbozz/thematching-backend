@@ -6,72 +6,24 @@
   <title>TheMatching Demo</title>
 
   <style>
-    body {
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      margin: 24px;
-    }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
     h1 { margin-bottom: 12px; }
 
-    /* ===== Tabs ===== */
-    .tabs {
-      display: flex;
-      border-bottom: 2px solid #eee;
-      margin-bottom: 12px;
-    }
-    .tab {
-      padding: 10px 16px;
-      cursor: pointer;
-      border-bottom: 3px solid transparent;
-      font-weight: 500;
-      user-select: none;
-    }
-    .tab.active {
-      border-color: #0070f3;
-      color: #0070f3;
-    }
-
+    .tabs { display: flex; border-bottom: 2px solid #eee; margin-bottom: 12px; }
+    .tab { padding: 10px 16px; cursor: pointer; border-bottom: 3px solid transparent; font-weight: 500; user-select: none; }
+    .tab.active { border-color: #0070f3; color: #0070f3; }
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
 
-    /* ===== Common UI ===== */
-    .row {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      flex-wrap: wrap;
-      margin-bottom: 8px;
-    }
-    input, select, button {
-      padding: 8px 10px;
-      font-size: 14px;
-    }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+    input, select, button { padding: 8px 10px; font-size: 14px; }
     button { cursor: pointer; }
 
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 12px;
-    }
-    th, td {
-      border-bottom: 1px solid #eee;
-      padding: 10px;
-      text-align: left;
-      vertical-align: top;
-    }
-    th {
-      background: #fafafa;
-      position: sticky;
-      top: 0;
-      z-index: 1;
-    }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { border-bottom: 1px solid #eee; padding: 10px; text-align: left; vertical-align: top; }
+    th { background: #fafafa; position: sticky; top: 0; z-index: 1; }
 
-    .pill {
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: 12px;
-      display: inline-block;
-      line-height: 1.4;
-    }
+    .pill { padding: 2px 8px; border-radius: 999px; font-size: 12px; display: inline-block; line-height: 1.4; }
     .pill.female { background: #ffe8f1; }
     .pill.male { background: #e8f2ff; }
     .pill.active { background: #e8fff0; }
@@ -84,108 +36,37 @@
 
     hr { border: 0; border-top: 1px solid #eee; margin: 16px 0; }
 
-    /* ===== Users row hover/click ===== */
     tr.user-row { cursor: pointer; }
     tr.user-row:hover { background: #fafafa; }
 
-    /* ===== Drawer ===== */
-    #drawerBackdrop {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,.25);
-      z-index: 20;
-    }
-    #drawer {
-      display: none;
-      position: fixed;
-      top: 0;
-      right: 0;
-      height: 100vh;
-      width: min(520px, 92vw);
-      background: #fff;
-      border-left: 1px solid #eee;
-      box-shadow: -8px 0 24px rgba(0,0,0,.10);
-      padding: 16px;
-      overflow: auto;
-      z-index: 30;
-    }
-    .drawer-header {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      align-items: center;
-      margin-bottom: 8px;
-    }
+    #drawerBackdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.25); z-index: 20; }
+    #drawer { display: none; position: fixed; top: 0; right: 0; height: 100vh; width: min(520px, 92vw);
+      background: #fff; border-left: 1px solid #eee; box-shadow: -8px 0 24px rgba(0,0,0,.10);
+      padding: 16px; overflow: auto; z-index: 30; }
+    .drawer-header { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 8px; }
     .drawer-title { font-weight: 700; }
     .drawer-sub { margin-top: 2px; }
-    .kv {
-      display: grid;
-      grid-template-columns: 120px 1fr;
-      gap: 6px 10px;
-      margin-top: 12px;
-    }
+
+    .kv { display: grid; grid-template-columns: 120px 1fr; gap: 6px 10px; margin-top: 12px; }
     .kv .k { color:#666; font-size:12px; }
     .kv .v { font-size: 14px; }
-    .drawer-section-title {
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-top: 14px;
-      font-weight: 700;
-    }
+    .drawer-section-title { display:flex; justify-content:space-between; align-items:center; margin-top: 14px; font-weight: 700; }
     .mini-table th, .mini-table td { padding: 8px; }
 
-    .btn-ghost {
-      background: #fff;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-    }
-    .btn-primary {
-      background: #0070f3;
-      border: 1px solid #0070f3;
-      color: #fff;
-      border-radius: 8px;
-    }
-    .btn-danger {
-      background: #fff;
-      border: 1px solid #f0b0b0;
-      color: #b00020;
-      border-radius: 8px;
-    }
+    .btn-ghost { background: #fff; border: 1px solid #ddd; border-radius: 8px; }
+    .btn-primary { background: #0070f3; border: 1px solid #0070f3; color: #fff; border-radius: 8px; }
+    .btn-danger { background: #fff; border: 1px solid #f0b0b0; color: #b00020; border-radius: 8px; }
 
-    /* ===== Results extra sections ===== */
-    .section-title {
-      margin-top: 14px;
-      font-weight: 700;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-    }
-    .card {
-      margin-top: 10px;
-      border: 1px solid #eee;
-      border-radius: 10px;
-      padding: 10px 12px;
-      background: #fff;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 10px;
-      margin-top: 10px;
-    }
-    .mini {
-      font-size: 12px;
-      color: #555;
-    }
+    .section-title { margin-top: 14px; font-weight: 700; display:flex; justify-content:space-between; align-items:center; }
+    .card { margin-top: 10px; border: 1px solid #eee; border-radius: 10px; padding: 10px 12px; background: #fff; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-top: 10px; }
+    .mini { font-size: 12px; color: #555; }
   </style>
 </head>
 
 <body>
 <h1>TheMatching Demo</h1>
 
-<!-- ===== Admin Token ===== -->
 <div class="row">
   <label>Admin Token:</label>
   <input id="token" type="password" size="32" placeholder="thematching-cron-2025-01" />
@@ -194,17 +75,12 @@
 
 <hr />
 
-<!-- ===== Tabs ===== -->
 <div class="tabs">
   <div class="tab active" data-tab="users">Users</div>
   <div class="tab" data-tab="results">Matching Results</div>
 </div>
 
-<!-- ===================================================== -->
-<!-- ====================== USERS ======================== -->
-<!-- ===================================================== -->
 <div id="tab-users" class="tab-panel active">
-
   <div class="row">
     <label>Gender:</label>
     <select id="gender">
@@ -231,6 +107,7 @@
         <th>Age</th>
         <th>LINE</th>
         <th>Verified</th>
+        <th>KYC</th>
         <th>Created</th>
       </tr>
     </thead>
@@ -238,11 +115,7 @@
   </table>
 </div>
 
-<!-- ===================================================== -->
-<!-- ================= MATCHING RESULTS ================== -->
-<!-- ===================================================== -->
 <div id="tab-results" class="tab-panel">
-
   <div class="row">
     <label>slotDt:</label>
     <input id="slotDt" size="32" value="2025-12-05T19:00:00+09:00" />
@@ -253,7 +126,6 @@
     <span id="resultsStatus" class="status muted"></span>
   </div>
 
-  <!-- Matched groups table -->
   <div class="section-title">
     <span>Matched Groups</span>
     <span class="muted" id="groupsMeta"></span>
@@ -275,7 +147,6 @@
     <tbody id="resultsTbody"></tbody>
   </table>
 
-  <!-- Unmatched users -->
   <div class="section-title">
     <span>Unmatched Users</span>
     <span class="muted" id="unmatchedMeta"></span>
@@ -284,7 +155,6 @@
   <div id="unmatchedWrap" class="grid"></div>
 </div>
 
-<!-- ===== Drawer UI ===== -->
 <div id="drawerBackdrop"></div>
 
 <aside id="drawer">
@@ -305,7 +175,6 @@
 <script>
   const $ = (id) => document.getElementById(id);
 
-  /* ===== Tabs ===== */
   document.querySelectorAll(".tab").forEach(tab => {
     tab.addEventListener("click", () => {
       document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
@@ -339,7 +208,6 @@
     catch { return String(iso); }
   }
 
-  /* ===== Drawer ===== */
   let currentUserId = null;
 
   function openDrawer() {
@@ -358,7 +226,6 @@
     if (currentUserId != null) loadUserDetail(currentUserId);
   });
 
-  // ✅ KYC toggle
   async function toggleKyc(userId, next) {
     const token = tokenOrAlert(); if (!token) return;
 
@@ -388,8 +255,8 @@
       return;
     }
 
-    // 再読込
     loadUserDetail(userId);
+    // 一覧にも反映したい場合は Load Users を押し直す運用でOK（必要なら自動リロードにもできます）
   }
 
   async function loadUserDetail(userId) {
@@ -449,7 +316,6 @@
       </tr>
     `).join("");
 
-    // ✅ Photo (prefer masked)
     const photoUrl = u.photo_masked_url || u.photo_url || "";
     const photoHtml = photoUrl ? `
       <div style="display:flex; align-items:center; gap:12px; margin: 8px 0 10px;">
@@ -465,31 +331,18 @@
       <div class="muted" style="margin: 8px 0 10px; font-size:12px;">photo: —</div>
     `;
 
-    // ✅ KYC
+    const uidNum = Number(u.user_id) || 0;
     const kycHtml = `
       <div style="margin: 6px 0 10px;">
-        <b>KYC:</b>
-        ${u.kyc_verified ? "✅ 承認済み" : "— 未確認"}
+        <b>KYC:</b> ${u.kyc_verified ? "✅ 承認済み" : "— 未確認"}
         ${u.kyc_verified_at ? `<div class="muted mini">${esc(fmtDateJa(u.kyc_verified_at))}</div>` : ""}
         <div class="row" style="margin-top:8px;">
-          <button
-            class="btn-primary"
-            onclick="toggleKyc(${esc(u.user_id)}, ${u.kyc_verified ? "false" : "true"})">
+          <button class="btn-primary" onclick="toggleKyc(${uidNum}, ${u.kyc_verified ? "false" : "true"})">
             ${u.kyc_verified ? "KYCを解除" : "KYCを承認"}
           </button>
         </div>
       </div>
     `;
-
-    const kycBtn = `
-  <div class="row" style="margin-top:8px;">
-    <button
-      class="btn-primary"
-      onclick="toggleKyc(${u.user_id}, ${!u.kyc_verified})">
-      ${u.kyc_verified ? "KYCを解除" : "KYCを承認"}
-    </button>
-  </div>
-`;
 
     $("drawerBody").innerHTML = `
       <div>
@@ -533,7 +386,6 @@
     `;
   }
 
-  /* ===== Load Users ===== */
   $("loadUsers").onclick = async () => {
     const token = tokenOrAlert(); if (!token) return;
 
@@ -565,6 +417,7 @@
 
     $("usersTbody").innerHTML = (data.users || []).map(u => {
       const age = (u.age === 0 || u.age === "0") ? "—" : (u.age ?? "—");
+      const kyc = u.kyc_verified ? "✅" : "—";
       return `
         <tr class="user-row" data-user-id="${esc(u.user_id)}" title="click to open detail">
           <td class="mono">${u.user_id}</td>
@@ -573,10 +426,11 @@
           <td>${esc(age)}</td>
           <td class="muted mono">${esc(u.line_user_id || "")}</td>
           <td>${u.verified_age ? "✅" : "—"}</td>
+          <td>${kyc}</td>
           <td class="muted">${esc(fmtDateJa(u.created_at))}</td>
         </tr>
       `;
-    }).join("") || `<tr><td colspan="7" class="muted">no users</td></tr>`;
+    }).join("") || `<tr><td colspan="8" class="muted">no users</td></tr>`;
 
     document.querySelectorAll("tr.user-row[data-user-id]").forEach(tr => {
       tr.addEventListener("click", () => {
@@ -586,7 +440,6 @@
     });
   };
 
-  /* ===== Run Matching ===== */
   $("runMatching").onclick = async () => {
     const token = tokenOrAlert(); if (!token) return;
     const slotDt = $("slotDt").value.trim();
@@ -598,10 +451,7 @@
     try {
       res = await fetch("/cron/matching/manual", {
         method: "POST",
-        headers: {
-          "Content-Type":"application/json",
-          "Authorization":`Bearer ${token}`
-        },
+        headers: { "Content-Type":"application/json", "Authorization":`Bearer ${token}` },
         body: JSON.stringify({ slotDt })
       });
     } catch (e) {
@@ -620,7 +470,6 @@
     $("loadResults").click();
   };
 
-  /* ===== Load Results ===== */
   $("loadResults").onclick = async () => {
     const token = tokenOrAlert(); if (!token) return;
     const slotDt = $("slotDt").value.trim();
