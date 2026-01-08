@@ -106,7 +106,6 @@
         <th>Gender</th>
         <th>Age</th>
         <th>LINE</th>
-        <th>Verified</th>
         <th>KYC</th>
         <th>Created</th>
       </tr>
@@ -415,22 +414,19 @@
     const data = await res.json();
     setStatus($("usersStatus"), `loaded ${data.count}`, "ok");
 
-    $("usersTbody").innerHTML = (data.users || []).map(u => {
-      const age = (u.age === 0 || u.age === "0") ? "—" : (u.age ?? "—");
-      const kyc = u.kyc_verified ? "✅" : "—";
-      return `
-        <tr class="user-row" data-user-id="${esc(u.user_id)}" title="click to open detail">
-          <td class="mono">${u.user_id}</td>
-          <td>${esc(u.nickname || "(none)")}</td>
-          <td><span class="pill ${u.gender}">${u.gender}</span></td>
-          <td>${esc(age)}</td>
-          <td class="muted mono">${esc(u.line_user_id || "")}</td>
-          <td>${u.verified_age ? "✅" : "—"}</td>
-          <td>${kyc}</td>
-          <td class="muted">${esc(fmtDateJa(u.created_at))}</td>
-        </tr>
-      `;
-    }).join("") || `<tr><td colspan="8" class="muted">no users</td></tr>`;
+$("usersTbody").innerHTML = (data.users || []).map(u => {
+  const age = (u.age === 0 || u.age === "0") ? "—" : (u.age ?? "—");
+  return `
+    <tr class="user-row" data-user-id="${esc(u.user_id)}" title="click to open detail">
+      <td class="mono">${u.user_id}</td>
+      <td>${esc(u.nickname || "(none)")}</td>
+      <td><span class="pill ${u.gender}">${u.gender}</span></td>
+      <td>${esc(age)}</td>
+      <td class="muted mono">${esc(u.line_user_id || "")}</td>
+      <td class="muted">${esc(fmtDateJa(u.created_at))}</td>
+    </tr>
+  `;
+}).join("") || `<tr><td colspan="6" class="muted">no users</td></tr>`;
 
     document.querySelectorAll("tr.user-row[data-user-id]").forEach(tr => {
       tr.addEventListener("click", () => {
