@@ -22,15 +22,6 @@ function getDb(req: any): Pool {
   return db;
 }
 
-function parseUserId(req: any, res: any): number | null {
-  const userId = Number(req.params.userId);
-  if (!Number.isFinite(userId)) {
-    res.status(400).json({ error: "invalid userId" });
-    return null;
-  }
-  return userId;
-}
-
 /**
  * GET /admin/users/:userId
  * - ユーザ基本 + プロフィール（一覧より詳細）
@@ -41,8 +32,10 @@ router.get("/users/:userId", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
   const db = getDb(req);
-  const userId = parseUserId(req, res);
-  if (userId == null) return;
+  const userId = Number(req.params.userId);
+  if (!Number.isFinite(userId)) {
+    return res.status(400).json({ error: "invalid userId" });
+  }
 
   try {
     const sql = `
@@ -59,6 +52,7 @@ router.get("/users/:userId", async (req, res) => {
         p.photo_url,
         p.photo_masked_url,
 
+        -- ✅ KYC
         p.kyc_verified,
         p.kyc_verified_at
       FROM users u
@@ -68,9 +62,7 @@ router.get("/users/:userId", async (req, res) => {
     `;
     const { rows } = await db.query(sql, [userId]);
 
-    if (rows.length === 0) {
-      return res.status(404).json({ error: "not_found" });
-    }
+    if (rows.length === 0) return res.status(404).json({ error: "not_found" });
 
     const r: any = rows[0];
     return res.json({
@@ -88,6 +80,7 @@ router.get("/users/:userId", async (req, res) => {
         photo_url: r.photo_url ?? null,
         photo_masked_url: r.photo_masked_url ?? null,
 
+        // ✅ KYC
         kyc_verified: Boolean(r.kyc_verified),
         kyc_verified_at: r.kyc_verified_at ?? null,
       },
@@ -100,29 +93,23 @@ router.get("/users/:userId", async (req, res) => {
 
 /**
  * POST /admin/users/:userId/kyc
- * - 管理画面からKYC済みフラグをON/OFF
+ * - 管理画面からKYC承認/解除
  * body: { verified: boolean }
  */
 router.post("/users/:userId/kyc", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
   const db = getDb(req);
-  const userId = parseUserId(req, res);
-  if (userId == null) return;
-
-  const verified = (req.body || {})?.verified;
-  if (typeof verified !== "boolean") {
-    return res.status(400).json({ error: "invalid_request", hint: "body.verified must be boolean" });
+  const userId = Number(req.params.userId);
+  if (!Number.isFinite(userId)) {
+    return res.status(400).json({ error: "invalid userId" });
   }
 
-  try {
-    // user_profiles が無いユーザーに対しては 412（プロフィール後にKYCの前提）
-    const exists = await db.query(`SELECT 1 FROM user_profiles WHERE user_id = $1 LIMIT 1`, [userId]);
-    if ((exists.rowCount ?? 0) === 0) {
-      return res.status(412).json({ error: "profile_required" });
-    }
+  const verified = Boolean(req.body?.verified);
 
-    await db.query(
+  try {
+    // user_profiles が無いユーザは対象外（プロフィール後にKYCの設計）
+    const upd = await db.query(
       `
       UPDATE user_profiles
       SET
@@ -130,11 +117,21 @@ router.post("/users/:userId/kyc", async (req, res) => {
         kyc_verified_at = CASE WHEN $2 THEN now() ELSE NULL END,
         updated_at = now()
       WHERE user_id = $1
+      RETURNING user_id, kyc_verified, kyc_verified_at
       `,
-      [userId, verified]
+      [userId, verified],
     );
 
-    return res.json({ ok: true, userId, kyc_verified: verified });
+    if ((upd.rowCount ?? 0) === 0) {
+      return res.status(412).json({ error: "profile_required" });
+    }
+
+    return res.json({
+      ok: true,
+      userId,
+      kyc_verified: Boolean(upd.rows[0]?.kyc_verified),
+      kyc_verified_at: upd.rows[0]?.kyc_verified_at ?? null,
+    });
   } catch (e: any) {
     console.error("[admin/users/:userId/kyc] error", e);
     return res.status(500).json({ error: e?.message || "server_error" });
@@ -144,18 +141,19 @@ router.post("/users/:userId/kyc", async (req, res) => {
 /**
  * GET /admin/users/:userId/slots?limit=200
  * - ✅ スロット単位の処理ステータスを返す（user_setup_slots.status）
- * - 既存の slots[].status を slot_status に差し替え（デグレ回避）
+ * - slots[].status は slot_status を返す（既存UI互換）
  */
 router.get("/users/:userId/slots", async (req, res) => {
   if (!requireAdmin(req, res)) return;
 
   const db = getDb(req);
-  const userId = parseUserId(req, res);
-  if (userId == null) return;
+  const userId = Number(req.params.userId);
+  if (!Number.isFinite(userId)) {
+    return res.status(400).json({ error: "invalid userId" });
+  }
 
   const limit = Math.min(Number(req.query.limit || 200), 500);
 
-  // 任意: status フィルタ（slot_statusで絞る）
   const status = (req.query.status as string | undefined) || undefined;
   if (status && status !== "active" && status !== "processed") {
     return res.status(400).json({ error: "invalid status filter" });
@@ -209,12 +207,11 @@ router.get("/users/:userId/slots", async (req, res) => {
         cost_pref: r.cost_pref,
         venue_pref: r.venue_pref,
 
-        // ✅ 既存互換：slots[].status は slot_status
-        status: r.slot_status,
+        status: r.slot_status, // 既存互換
 
         setup_status: r.setup_status,
-
         submitted_at: r.submitted_at,
+
         slot_id: Number(r.slot_id),
         slot_dt: r.slot_dt,
         slot_jst: r.slot_jst,

@@ -36,9 +36,11 @@ async function getEntriesForSlot(slotDt) {
     FROM user_setup_slots sl
       JOIN user_setup s     ON s.id = sl.user_setup_id
       JOIN users u          ON u.id = s.user_id
-      JOIN user_profiles p ON p.user_id = u.id
+      JOIN user_profiles p  ON p.user_id = u.id
     WHERE sl.slot_dt = $1
       AND sl.status = 'active'
+      -- ✅ KYC済みのみ対象（NULLはfalse扱い）
+      AND COALESCE(p.kyc_verified, false) = true
     ORDER BY u.id
     `, [slotDt]);
     return rows.map((r) => ({

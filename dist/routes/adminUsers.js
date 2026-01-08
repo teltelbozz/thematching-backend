@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+// src/routes/adminUsers.ts
 const express_1 = require("express");
 const db_1 = require("../db");
 const router = (0, express_1.Router)();
@@ -7,22 +8,16 @@ const router = (0, express_1.Router)();
  * GET /admin/users
  * - 管理画面向けユーザ一覧（デモHTMLでも使う）
  * - 認証: Authorization: Bearer <ADMIN_SECRET or CRON_SECRET>
- *
- * NOTE:
- *  将来は「管理者ログイン」等に差し替えやすいように、ここでまとめてガード。
  */
 router.get("/users", async (req, res) => {
-    const secret = process.env.ADMIN_SECRET || process.env.CRON_SECRET; // まずは簡易
+    const secret = process.env.ADMIN_SECRET || process.env.CRON_SECRET;
     const auth = req.header("authorization") || "";
     if (!secret || auth !== `Bearer ${secret}`) {
         console.warn("[admin/users] unauthorized");
         return res.status(401).json({ error: "unauthorized" });
     }
-    // オプション: gender フィルタ (male/female)
     const gender = req.query.gender || undefined;
-    // オプション: キーワード検索（nickname / line_user_id / user_id）
     const q = req.query.q || undefined;
-    // オプション: 上限制御
     const limit = Math.min(Number(req.query.limit || 200), 500);
     const offset = Math.max(Number(req.query.offset || 0), 0);
     try {
@@ -34,7 +29,6 @@ router.get("/users", async (req, res) => {
             params.push(gender);
         }
         if (q && q.trim()) {
-            // user_id も検索できるように text 化
             where.push(`(p.nickname ILIKE $${i} OR u.line_user_id ILIKE $${i} OR u.id::text = $${i})`);
             params.push(`%${q.trim()}%`);
             i++;
@@ -45,10 +39,15 @@ router.get("/users", async (req, res) => {
         u.id AS user_id,
         u.line_user_id,
         u.created_at,
+
         p.nickname,
         p.gender,
         p.age,
-        p.verified_age
+        p.verified_age,
+
+        -- ✅ 追加
+        p.kyc_verified,
+        p.kyc_verified_at
       FROM users u
       JOIN user_profiles p ON p.user_id = u.id
       ${whereSql}
@@ -64,10 +63,13 @@ router.get("/users", async (req, res) => {
                 user_id: Number(r.user_id),
                 line_user_id: r.line_user_id,
                 created_at: r.created_at,
-                nickname: r.nickname,
-                gender: r.gender === "female" ? "female" : "male",
-                age: Number(r.age),
+                nickname: r.nickname ?? null,
+                gender: r.gender === "female" ? "female" : (r.gender === "male" ? "male" : r.gender),
+                age: r.age == null ? null : Number(r.age),
                 verified_age: Boolean(r.verified_age),
+                // ✅ 追加
+                kyc_verified: Boolean(r.kyc_verified),
+                kyc_verified_at: r.kyc_verified_at ?? null,
             })),
         });
     }
