@@ -168,6 +168,7 @@
       border-radius: 10px;
       padding: 10px 12px;
       background: #fff;
+      cursor: pointer;
     }
     .grid {
       display: grid;
@@ -230,7 +231,7 @@
         <th>Gender</th>
         <th>Age</th>
         <th>LINE</th>
-        <!-- ✅ Verified 列は表示から削除 -->
+        <th>KYC</th>
         <th>Created</th>
       </tr>
     </thead>
@@ -474,7 +475,7 @@
         <div class="row" style="margin-top:8px;">
           <button
             class="btn-primary"
-            onclick="toggleKyc(${esc(u.user_id)}, ${u.kyc_verified ? "false" : "true"})">
+            onclick="toggleKyc(${Number(u.user_id)}, ${u.kyc_verified ? "false" : "true"})">
             ${u.kyc_verified ? "KYCを解除" : "KYCを承認"}
           </button>
         </div>
@@ -489,7 +490,6 @@
         <div class="row" style="margin: 0;">
           <span class="pill ${genderClass}">${esc(u.gender || "-")}</span>
           <span>Age: <b>${esc(age)}</b></span>
-          <span>Verified: ${u.verified_age ? "✅" : "—"}</span>
         </div>
 
         <div class="kv">
@@ -555,18 +555,21 @@
 
     $("usersTbody").innerHTML = (data.users || []).map(u => {
       const age = (u.age === 0 || u.age === "0") ? "—" : (u.age ?? "—");
+      const kyc = (u.kyc_verified === true) ? "✅" : "—";
       return `
         <tr class="user-row" data-user-id="${esc(u.user_id)}" title="click to open detail">
-          <td class="mono">${u.user_id}</td>
+          <td class="mono">${esc(u.user_id)}</td>
           <td>${esc(u.nickname || "(none)")}</td>
-          <td><span class="pill ${u.gender}">${u.gender}</span></td>
+          <td><span class="pill ${esc(u.gender)}">${esc(u.gender || "")}</span></td>
           <td>${esc(age)}</td>
           <td class="muted mono">${esc(u.line_user_id || "")}</td>
+          <td>${kyc}</td>
           <td class="muted">${esc(fmtDateJa(u.created_at))}</td>
         </tr>
       `;
-    }).join("") || `<tr><td colspan="6" class="muted">no users</td></tr>`;
+    }).join("") || `<tr><td colspan="7" class="muted">no users</td></tr>`;
 
+    // 行クリック → ドロワー
     document.querySelectorAll("tr.user-row[data-user-id]").forEach(tr => {
       tr.addEventListener("click", () => {
         const id = tr.getAttribute("data-user-id");
@@ -689,7 +692,6 @@
             <span class="muted">age ${esc(age)}</span>
           </div>
           <div class="mini mono" style="margin-top:6px;">${esc(u.line_user_id || "")}</div>
-          <div class="mini" style="margin-top:6px;">verified: ${u.verified_age ? "✅" : "—"}</div>
         </div>
       `;
     }).join("");
