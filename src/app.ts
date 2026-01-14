@@ -24,6 +24,9 @@ import termsRoutes from "./routes/terms";
 // ★ 追加：Blob routes
 import blobRoutes from "./routes/blob";
 
+// ★ グループページ
+import groupPublicRouter from "./routes/groupPublic";
+
 const app = express();
 
 // Vercel/プロキシ越しでも Secure Cookie を有効化
@@ -69,5 +72,9 @@ app.use("/admin", adminUserDetailRouter);
 
 // dist/public を参照
 app.use(express.static(path.join(__dirname, "public")));
+
+// ★ グループページ（完全共有型）
+app.use("/api/g", groupPublicRouter);
+
 
 export default app;

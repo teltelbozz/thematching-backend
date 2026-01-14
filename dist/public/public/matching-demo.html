@@ -1,0 +1,709 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TheMatching Demo</title>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 24px;
+    }
+    h1 { margin-bottom: 12px; }
+
+    /* ===== Tabs ===== */
+    .tabs {
+      display: flex;
+      border-bottom: 2px solid #eee;
+      margin-bottom: 12px;
+    }
+    .tab {
+      padding: 10px 16px;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      font-weight: 500;
+      user-select: none;
+    }
+    .tab.active {
+      border-color: #0070f3;
+      color: #0070f3;
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ===== Common UI ===== */
+    .row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    input, select, button {
+      padding: 8px 10px;
+      font-size: 14px;
+    }
+    button { cursor: pointer; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+    th, td {
+      border-bottom: 1px solid #eee;
+      padding: 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #fafafa;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .pill {
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      display: inline-block;
+      line-height: 1.4;
+    }
+    .pill.female { background: #ffe8f1; }
+    .pill.male { background: #e8f2ff; }
+    .pill.active { background: #e8fff0; }
+    .pill.processed { background: #f2f2f2; }
+
+    .muted { color: #777; font-size: 12px; }
+    .status.ok { color: #067d17; }
+    .status.err { color: #b00020; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    hr { border: 0; border-top: 1px solid #eee; margin: 16px 0; }
+
+    /* ===== Users row hover/click ===== */
+    tr.user-row { cursor: pointer; }
+    tr.user-row:hover { background: #fafafa; }
+
+    /* ===== Drawer ===== */
+    #drawerBackdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.25);
+      z-index: 20;
+    }
+    #drawer {
+      display: none;
+      position: fixed;
+      top: 0;
+      right: 0;
+      height: 100vh;
+      width: min(520px, 92vw);
+      background: #fff;
+      border-left: 1px solid #eee;
+      box-shadow: -8px 0 24px rgba(0,0,0,.10);
+      padding: 16px;
+      overflow: auto;
+      z-index: 30;
+    }
+    .drawer-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .drawer-title { font-weight: 700; }
+    .drawer-sub { margin-top: 2px; }
+    .kv {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 6px 10px;
+      margin-top: 12px;
+    }
+    .kv .k { color:#666; font-size:12px; }
+    .kv .v { font-size: 14px; }
+    .drawer-section-title {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-top: 14px;
+      font-weight: 700;
+    }
+    .mini-table th, .mini-table td { padding: 8px; }
+
+    .btn-ghost {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    .btn-primary {
+      background: #0070f3;
+      border: 1px solid #0070f3;
+      color: #fff;
+      border-radius: 8px;
+    }
+    .btn-danger {
+      background: #fff;
+      border: 1px solid #f0b0b0;
+      color: #b00020;
+      border-radius: 8px;
+    }
+
+    /* ===== Results extra sections ===== */
+    .section-title {
+      margin-top: 14px;
+      font-weight: 700;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+    .card {
+      margin-top: 10px;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #fff;
+      cursor: pointer;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .mini {
+      font-size: 12px;
+      color: #555;
+    }
+  </style>
+</head>
+
+<body>
+<h1>TheMatching Demo</h1>
+
+<!-- ===== Admin Token ===== -->
+<div class="row">
+  <label>Admin Token:</label>
+  <input id="token" type="password" size="32" placeholder="thematching-cron-2025-01" />
+  <span class="muted">※ /admin /cron 系API共通</span>
+</div>
+
+<hr />
+
+<!-- ===== Tabs ===== -->
+<div class="tabs">
+  <div class="tab active" data-tab="users">Users</div>
+  <div class="tab" data-tab="results">Matching Results</div>
+</div>
+
+<!-- ===================================================== -->
+<!-- ====================== USERS ======================== -->
+<!-- ===================================================== -->
+<div id="tab-users" class="tab-panel active">
+
+  <div class="row">
+    <label>Gender:</label>
+    <select id="gender">
+      <option value="">all</option>
+      <option value="female">female</option>
+      <option value="male">male</option>
+    </select>
+
+    <label>Search:</label>
+    <input id="q" placeholder="nickname / LINE_xxx / user_id" />
+
+    <button class="btn-primary" id="loadUsers">Load Users</button>
+    <span id="usersStatus" class="status muted"></span>
+
+    <span class="muted">（行クリックで詳細＆スロット表示）</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>User ID</th>
+        <th>Nickname</th>
+        <th>Gender</th>
+        <th>Age</th>
+        <th>LINE</th>
+        <th>KYC</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody id="usersTbody"></tbody>
+  </table>
+</div>
+
+<!-- ===================================================== -->
+<!-- ================= MATCHING RESULTS ================== -->
+<!-- ===================================================== -->
+<div id="tab-results" class="tab-panel">
+
+  <div class="row">
+    <label>slotDt:</label>
+    <input id="slotDt" size="32" value="2025-12-05T19:00:00+09:00" />
+
+    <button class="btn-primary" id="runMatching">▶ Run Matching</button>
+    <button class="btn-ghost" id="loadResults">Load Results</button>
+
+    <span id="resultsStatus" class="status muted"></span>
+  </div>
+
+  <!-- Matched groups table -->
+  <div class="section-title">
+    <span>Matched Groups</span>
+    <span class="muted" id="groupsMeta"></span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Group</th>
+        <th>Slot</th>
+        <th>Location</th>
+        <th>Type</th>
+        <th>Status</th>
+        <th>Token</th>
+        <th>Female</th>
+        <th>Male</th>
+      </tr>
+    </thead>
+    <tbody id="resultsTbody"></tbody>
+  </table>
+
+  <!-- Unmatched users -->
+  <div class="section-title">
+    <span>Unmatched Users</span>
+    <span class="muted" id="unmatchedMeta"></span>
+  </div>
+
+  <div id="unmatchedWrap" class="grid"></div>
+</div>
+
+<!-- ===== Drawer UI ===== -->
+<div id="drawerBackdrop"></div>
+
+<aside id="drawer">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title" id="drawerTitle">User Detail</div>
+      <div class="drawer-sub muted" id="drawerSub"></div>
+    </div>
+    <div class="row" style="gap:8px; margin:0;">
+      <button class="btn-ghost" id="drawerReload">Reload</button>
+      <button class="btn-danger" id="drawerClose">Close</button>
+    </div>
+  </div>
+
+  <div id="drawerBody" class="muted">select a user…</div>
+</aside>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  /* ===== Tabs ===== */
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+      tab.classList.add("active");
+      $("tab-" + tab.dataset.tab).classList.add("active");
+    });
+  });
+
+  function tokenOrAlert() {
+    const t = $("token").value.trim();
+    if (!t) { alert("Admin Token を入力してください"); return null; }
+    return t;
+  }
+
+  function esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c =>
+      ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])
+    );
+  }
+
+  function setStatus(el, text, kind) {
+    el.textContent = text;
+    el.classList.remove("ok", "err");
+    if (kind) el.classList.add(kind);
+  }
+
+  function fmtDateJa(iso) {
+    if (!iso) return "—";
+    try { return new Date(iso).toLocaleString("ja-JP"); }
+    catch { return String(iso); }
+  }
+
+  /* ===== Drawer ===== */
+  let currentUserId = null;
+
+  function openDrawer() {
+    $("drawerBackdrop").style.display = "block";
+    $("drawer").style.display = "block";
+  }
+  function closeDrawer() {
+    $("drawerBackdrop").style.display = "none";
+    $("drawer").style.display = "none";
+  }
+
+  $("drawerClose").addEventListener("click", closeDrawer);
+  $("drawerBackdrop").addEventListener("click", closeDrawer);
+
+  $("drawerReload").addEventListener("click", () => {
+    if (currentUserId != null) loadUserDetail(currentUserId);
+  });
+
+  // ✅ KYC toggle
+  async function toggleKyc(userId, next) {
+    const token = tokenOrAlert(); if (!token) return;
+
+    const ok = confirm(next
+      ? "このユーザーをKYC承認しますか？"
+      : "KYC承認を解除しますか？"
+    );
+    if (!ok) return;
+
+    let res;
+    try {
+      res = await fetch(`/admin/users/${userId}/kyc`, {
+        method: "POST",
+        headers: {
+          "Content-Type":"application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({ verified: !!next }),
+      });
+    } catch (e) {
+      alert(e?.message || String(e));
+      return;
+    }
+
+    if (!res.ok) {
+      alert(await res.text());
+      return;
+    }
+
+    // 再読込
+    loadUserDetail(userId);
+  }
+
+  async function loadUserDetail(userId) {
+    const token = tokenOrAlert(); if (!token) return;
+
+    currentUserId = userId;
+    openDrawer();
+    $("drawerTitle").textContent = `User #${userId}`;
+    $("drawerSub").textContent = "";
+    $("drawerBody").innerHTML = "loading...";
+
+    const detailUrl = new URL(`/admin/users/${userId}`, location.origin);
+    const slotsUrl  = new URL(`/admin/users/${userId}/slots`, location.origin);
+    slotsUrl.searchParams.set("limit", "200");
+
+    let r1, r2;
+    try {
+      [r1, r2] = await Promise.all([
+        fetch(detailUrl, { headers:{Authorization:`Bearer ${token}`} }),
+        fetch(slotsUrl,  { headers:{Authorization:`Bearer ${token}`} }),
+      ]);
+    } catch (e) {
+      $("drawerBody").innerHTML = `<div class="status err">network error</div><pre class="mono">${esc(e?.message || String(e))}</pre>`;
+      return;
+    }
+
+    if (!r1.ok) {
+      $("drawerBody").innerHTML = `<div class="status err">detail error: ${r1.status}</div><pre class="mono">${esc(await r1.text())}</pre>`;
+      return;
+    }
+    if (!r2.ok) {
+      $("drawerBody").innerHTML = `<div class="status err">slots error: ${r2.status}</div><pre class="mono">${esc(await r2.text())}</pre>`;
+      return;
+    }
+
+    const d = await r1.json();
+    const s = await r2.json();
+
+    const u = d.user || {};
+    const slots = (s.slots || []);
+
+    $("drawerTitle").textContent = `${u.nickname ? u.nickname : "User"} #${u.user_id}`;
+    $("drawerSub").textContent = u.line_user_id ? u.line_user_id : "";
+
+    const genderClass = u.gender === "female" ? "female" : (u.gender === "male" ? "male" : "");
+    const age = (u.age === 0 || u.age === "0" || u.age == null) ? "—" : u.age;
+
+    const pillClass = (st) => (st === "processed" ? "processed" : (st === "active" ? "active" : ""));
+
+    const slotRows = slots.map(x => `
+      <tr>
+        <td class="mono">${esc(x.slot_jst || "")}</td>
+        <td class="muted">${esc(x.week_key || "")}</td>
+        <td>${esc(x.type_mode || "")}</td>
+        <td>${esc(x.location || "")}</td>
+        <td><span class="pill ${pillClass(x.status)}">${esc(x.status || "")}</span></td>
+      </tr>
+    `).join("");
+
+    // ✅ Photo (prefer masked)
+    const photoUrl = u.photo_masked_url || u.photo_url || "";
+    const photoHtml = photoUrl ? `
+      <div style="display:flex; align-items:center; gap:12px; margin: 8px 0 10px;">
+        <img
+          src="${esc(photoUrl)}"
+          alt="photo"
+          style="width:72px; height:72px; border-radius:999px; object-fit:cover; background:#f2f2f2;"
+          onerror="this.style.display='none';"
+        />
+        <div class="muted" style="font-size:12px;">photo</div>
+      </div>
+    ` : `
+      <div class="muted" style="margin: 8px 0 10px; font-size:12px;">photo: —</div>
+    `;
+
+    // ✅ KYC
+    const kycHtml = `
+      <div style="margin: 6px 0 10px;">
+        <b>KYC:</b>
+        ${u.kyc_verified ? "✅ 承認済み" : "— 未確認"}
+        ${u.kyc_verified_at ? `<div class="muted mini">${esc(fmtDateJa(u.kyc_verified_at))}</div>` : ""}
+        <div class="row" style="margin-top:8px;">
+          <button
+            class="btn-primary"
+            onclick="toggleKyc(${Number(u.user_id)}, ${u.kyc_verified ? "false" : "true"})">
+            ${u.kyc_verified ? "KYCを解除" : "KYCを承認"}
+          </button>
+        </div>
+      </div>
+    `;
+
+    $("drawerBody").innerHTML = `
+      <div>
+        ${photoHtml}
+        ${kycHtml}
+
+        <div class="row" style="margin: 0;">
+          <span class="pill ${genderClass}">${esc(u.gender || "-")}</span>
+          <span>Age: <b>${esc(age)}</b></span>
+        </div>
+
+        <div class="kv">
+          <div class="k">user_id</div><div class="v mono">${esc(u.user_id)}</div>
+          <div class="k">line_user_id</div><div class="v mono">${esc(u.line_user_id || "—")}</div>
+          <div class="k">created_at</div><div class="v">${esc(fmtDateJa(u.created_at))}</div>
+        </div>
+      </div>
+
+      <hr />
+
+      <div class="drawer-section-title">
+        <span>Registered Slots</span>
+        <span class="muted">${slots.length}件</span>
+      </div>
+
+      <table class="mini-table" style="width:100%; border-collapse:collapse; margin-top:8px;">
+        <thead>
+          <tr>
+            <th style="text-align:left; border-bottom:1px solid #eee;">slot (JST)</th>
+            <th style="text-align:left; border-bottom:1px solid #eee;">week_key</th>
+            <th style="text-align:left; border-bottom:1px solid #eee;">type</th>
+            <th style="text-align:left; border-bottom:1px solid #eee;">location</th>
+            <th style="text-align:left; border-bottom:1px solid #eee;">slot_status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${slotRows || `<tr><td colspan="5" class="muted">no slots</td></tr>`}
+        </tbody>
+      </table>
+    `;
+  }
+
+  /* ===== Load Users ===== */
+  $("loadUsers").onclick = async () => {
+    const token = tokenOrAlert(); if (!token) return;
+
+    const url = new URL("/admin/users", location.origin);
+    if ($("gender").value) url.searchParams.set("gender", $("gender").value);
+    if ($("q").value) url.searchParams.set("q", $("q").value);
+    url.searchParams.set("limit", "300");
+
+    setStatus($("usersStatus"), "loading...", null);
+    $("usersTbody").innerHTML = "";
+
+    let res;
+    try {
+      res = await fetch(url, { headers:{Authorization:`Bearer ${token}`}});
+    } catch (e) {
+      setStatus($("usersStatus"), "network error", "err");
+      alert(e?.message || String(e));
+      return;
+    }
+
+    if (!res.ok) {
+      setStatus($("usersStatus"), `error ${res.status}`, "err");
+      alert(await res.text());
+      return;
+    }
+
+    const data = await res.json();
+    setStatus($("usersStatus"), `loaded ${data.count}`, "ok");
+
+    $("usersTbody").innerHTML = (data.users || []).map(u => {
+      const age = (u.age === 0 || u.age === "0") ? "—" : (u.age ?? "—");
+      const kyc = (u.kyc_verified === true) ? "✅" : "—";
+      return `
+        <tr class="user-row" data-user-id="${esc(u.user_id)}" title="click to open detail">
+          <td class="mono">${esc(u.user_id)}</td>
+          <td>${esc(u.nickname || "(none)")}</td>
+          <td><span class="pill ${esc(u.gender)}">${esc(u.gender || "")}</span></td>
+          <td>${esc(age)}</td>
+          <td class="muted mono">${esc(u.line_user_id || "")}</td>
+          <td>${kyc}</td>
+          <td class="muted">${esc(fmtDateJa(u.created_at))}</td>
+        </tr>
+      `;
+    }).join("") || `<tr><td colspan="7" class="muted">no users</td></tr>`;
+
+    // 行クリック → ドロワー
+    document.querySelectorAll("tr.user-row[data-user-id]").forEach(tr => {
+      tr.addEventListener("click", () => {
+        const id = tr.getAttribute("data-user-id");
+        if (id) loadUserDetail(id);
+      });
+    });
+  };
+
+  /* ===== Run Matching ===== */
+  $("runMatching").onclick = async () => {
+    const token = tokenOrAlert(); if (!token) return;
+    const slotDt = $("slotDt").value.trim();
+    if (!slotDt) return alert("slotDt を入力してください");
+
+    setStatus($("resultsStatus"), "running...", null);
+
+    let res;
+    try {
+      res = await fetch("/cron/matching/manual", {
+        method: "POST",
+        headers: {
+          "Content-Type":"application/json",
+          "Authorization":`Bearer ${token}`
+        },
+        body: JSON.stringify({ slotDt })
+      });
+    } catch (e) {
+      setStatus($("resultsStatus"), "network error", "err");
+      alert(e?.message || String(e));
+      return;
+    }
+
+    if (!res.ok) {
+      setStatus($("resultsStatus"), `error ${res.status}`, "err");
+      alert(await res.text());
+      return;
+    }
+
+    setStatus($("resultsStatus"), "done", "ok");
+    $("loadResults").click();
+  };
+
+  /* ===== Load Results ===== */
+  $("loadResults").onclick = async () => {
+    const token = tokenOrAlert(); if (!token) return;
+    const slotDt = $("slotDt").value.trim();
+    if (!slotDt) return alert("slotDt を入力してください");
+
+    const url = new URL("/admin/matching-results", location.origin);
+    url.searchParams.set("slotDt", slotDt);
+
+    setStatus($("resultsStatus"), "loading...", null);
+    $("resultsTbody").innerHTML = "";
+    $("unmatchedWrap").innerHTML = "";
+    $("groupsMeta").textContent = "";
+    $("unmatchedMeta").textContent = "";
+
+    let res;
+    try {
+      res = await fetch(url, { headers:{Authorization:`Bearer ${token}`}});
+    } catch (e) {
+      setStatus($("resultsStatus"), "network error", "err");
+      alert(e?.message || String(e));
+      return;
+    }
+
+    if (!res.ok) {
+      setStatus($("resultsStatus"), `error ${res.status}`, "err");
+      alert(await res.text());
+      return;
+    }
+
+    const data = await res.json();
+    setStatus($("resultsStatus"), `loaded ${data.count}`, "ok");
+
+    // ---- Matched Groups
+    $("groupsMeta").textContent = `${(data.count ?? 0)} groups`;
+
+    const renderPerson = p => `
+      <div style="margin-bottom:6px;">
+        <span class="pill ${esc(p.gender)}">${esc(p.gender)}</span>
+        <b>${esc(p.nickname)}</b>
+        <span class="muted">(${esc(p.age)})</span>
+        <div class="mini mono">${esc(p.user_id)} / ${esc(p.line_user_id || "")}</div>
+      </div>
+    `;
+
+    $("resultsTbody").innerHTML = (data.groups || []).map(g => `
+      <tr>
+        <td class="mono">${esc(g.groupId)}</td>
+        <td>${esc(fmtDateJa(g.slotDt))}</td>
+        <td>${esc(g.location)}</td>
+        <td>${esc(g.typeMode)}</td>
+        <td>${esc(g.status)}</td>
+        <td class="mono">${esc(g.token || "")}</td>
+        <td>${(g.female || []).map(renderPerson).join("")}</td>
+        <td>${(g.male || []).map(renderPerson).join("")}</td>
+      </tr>
+    `).join("") || `<tr><td colspan="8" class="muted">no results</td></tr>`;
+
+    // ---- Unmatched Users
+    const unmatched = data.unmatchedUsers || [];
+    const unmatchedCount = (data.unmatchedCount != null) ? data.unmatchedCount : unmatched.length;
+    $("unmatchedMeta").textContent = `${unmatchedCount} users`;
+
+    if (!unmatched.length) {
+      $("unmatchedWrap").innerHTML = `<div class="muted">no unmatched users</div>`;
+      return;
+    }
+
+    $("unmatchedWrap").innerHTML = unmatched.map(u => {
+      const genderClass = (u.gender === "female" ? "female" : (u.gender === "male" ? "male" : ""));
+      const age = (u.age === 0 || u.age === "0" || u.age == null) ? "—" : u.age;
+      return `
+        <div class="card" title="click to open user detail" data-user-id="${esc(u.user_id)}">
+          <div class="row" style="margin:0; gap:8px;">
+            <span class="pill ${genderClass}">${esc(u.gender || "-")}</span>
+            <b>#${esc(u.user_id)}</b>
+            <span class="muted">${esc(u.nickname || "(no nickname)")}</span>
+            <span class="muted">age ${esc(age)}</span>
+          </div>
+          <div class="mini mono" style="margin-top:6px;">${esc(u.line_user_id || "")}</div>
+        </div>
+      `;
+    }).join("");
+
+    // unmatched card click -> drawer
+    document.querySelectorAll('#unmatchedWrap [data-user-id]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.getAttribute('data-user-id');
+        if (id) loadUserDetail(id);
+      });
+    });
+  };
+</script>
+</body>
+</html>
