@@ -5,60 +5,81 @@ const express_1 = require("express");
 const router = (0, express_1.Router)();
 /**
  * GET /groups/:token
- * - グループのメンバー情報を返す
- * - token → matched_groups.id を検索
- * - matched_group_members からメンバー一覧取得
- * - users / user_profiles からプロフィール取得
+ * - 完全共有型（認証なし）
+ * - token 有効期限：イベント（slot_dt）翌日いっぱい（JST）まで
+ * - 表示：nickname / age / gender / occupation / photo（masked優先、なければ通常）
  */
 router.get("/:token", async (req, res) => {
-    const token = req.params.token;
+    const token = String(req.params.token || "").trim();
     const db = req.app.locals.db;
+    if (!token)
+        return res.status(400).json({ error: "invalid_token" });
     try {
-        // 1. token → group_id を検索
-        const gRes = await db.query(`SELECT id, slot_dt, location, type_mode, status
-       FROM matched_groups
-       WHERE token = $1
-       LIMIT 1`, [token]);
+        // 1) group 取得 + 期限計算（JSTで翌日いっぱい）
+        // expires_at = 「slot日の翌々日 00:00 JST（直前まで有効）」にして判定しやすくする
+        const gRes = await db.query(`
+      SELECT
+        id,
+        token,
+        slot_dt,
+        location,
+        type_mode,
+        status,
+        (slot_dt AT TIME ZONE 'Asia/Tokyo') AS slot_jst,
+        (
+          (date_trunc('day', slot_dt AT TIME ZONE 'Asia/Tokyo') + interval '2 day')
+          AT TIME ZONE 'Asia/Tokyo'
+        ) AS expires_at
+      FROM matched_groups
+      WHERE token = $1
+      LIMIT 1
+      `, [token]);
         const group = gRes.rows[0];
         if (!group) {
             return res.status(404).json({ error: "group_not_found" });
         }
-        // 2. メンバー一覧
-        const mRes = await db.query(`SELECT user_id, gender
-       FROM matched_group_members
-       WHERE group_id = $1
-       ORDER BY gender, user_id`, [group.id]);
-        const members = mRes.rows;
-        if (members.length === 0) {
-            return res.json({
-                group,
-                members: []
-            });
+        // 期限切れ判定（now() は timestamptz）
+        const exp = new Date(group.expires_at).getTime();
+        const now = Date.now();
+        if (!Number.isFinite(exp) || now >= exp) {
+            return res.status(404).json({ error: "group_expired" });
         }
-        // 3. プロフィール取得
-        const ids = members.map((m) => m.user_id);
-        const pRes = await db.query(`SELECT 
-         u.id,
-         up.nickname,
-         up.age,
-         up.gender,
-         up.photo_masked_url
-       FROM users u
-       LEFT JOIN user_profiles up ON up.user_id = u.id
-       WHERE u.id = ANY($1::bigint[])`, [ids]);
-        const profMap = new Map();
-        for (const row of pRes.rows) {
-            profMap.set(row.id, row);
-        }
-        // 4. 結合して返す
-        const memberProfiles = members.map((m) => ({
-            user_id: m.user_id,
-            gender: m.gender,
-            profile: profMap.get(m.user_id) || null
-        }));
+        // 2) メンバー + プロフィールを1発で取得（順序は female -> male -> user_id）
+        const mRes = await db.query(`
+      SELECT
+        mgm.user_id,
+        mgm.gender,
+        up.nickname,
+        up.age,
+        up.occupation,
+        COALESCE(up.photo_masked_url, up.photo_url) AS photo_url
+      FROM matched_group_members mgm
+      LEFT JOIN user_profiles up ON up.user_id = mgm.user_id
+      WHERE mgm.group_id = $1
+      ORDER BY
+        CASE mgm.gender WHEN 'female' THEN 0 WHEN 'male' THEN 1 ELSE 2 END,
+        mgm.user_id
+      `, [group.id]);
         return res.json({
-            group,
-            members: memberProfiles
+            ok: true,
+            group: {
+                id: Number(group.id),
+                token: group.token,
+                status: group.status,
+                slot_dt: group.slot_dt, // ISO (timestamptz)
+                slot_jst: group.slot_jst, // "YYYY-MM-DD HH:MM:SS"
+                location: group.location,
+                type_mode: group.type_mode,
+                expires_at: group.expires_at // ISO (timestamptz)
+            },
+            members: mRes.rows.map((r) => ({
+                user_id: Number(r.user_id),
+                gender: r.gender,
+                nickname: r.nickname ?? null,
+                age: r.age == null ? null : Number(r.age),
+                occupation: r.occupation ?? null,
+                photo_url: r.photo_url ?? null,
+            })),
         });
     }
     catch (e) {

@@ -53,7 +53,8 @@ app.use("/api/blob", requireAuth_1.default, blob_1.default);
 app.use("/api/me", me_1.default);
 app.use("/api/match-prefs", matchPrefs_1.default);
 app.use("/api/setup", requireAuth_1.default, setup_1.default);
-app.use("/groups", groups_1.default);
+app.use("/api/groups", groups_1.default); // ★フロントのAPI_BASEが /api 前提なら必須
+app.use("/groups", groups_1.default); // ★既存互換（残したいなら）
 app.use("/cron", cron_1.default);
 app.use("/admin", matchingResult_1.default);
 app.use("/admin", adminUsers_1.default);

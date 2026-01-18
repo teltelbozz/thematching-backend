@@ -64,7 +64,8 @@ app.use("/api/blob", requireAuth, blobRoutes);
 app.use("/api/me", meRoutes);
 app.use("/api/match-prefs", matchPrefsRoutes);
 app.use("/api/setup", requireAuth, setupRoutes);
-app.use("/groups", groupsRouter);
+app.use("/api/groups", groupsRouter); // ★フロントのAPI_BASEが /api 前提なら必須
+app.use("/groups", groupsRouter);     // ★既存互換（残したいなら）
 app.use("/cron", cronRouter);
 app.use("/admin", matchingResultRouter);
 app.use("/admin", adminUsersRouter);
