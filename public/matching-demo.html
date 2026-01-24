@@ -272,11 +272,8 @@
   <div class="tab" data-tab="results">Matching Results</div>
 </div>
 
-<!-- ===================================================== -->
 <!-- ====================== USERS ======================== -->
-<!-- ===================================================== -->
 <div id="tab-users" class="tab-panel active">
-
   <div class="row">
     <label>Gender:</label>
     <select id="gender">
@@ -310,11 +307,8 @@
   </table>
 </div>
 
-<!-- ===================================================== -->
 <!-- ================= MATCHING RESULTS ================== -->
-<!-- ===================================================== -->
 <div id="tab-results" class="tab-panel">
-
   <div class="row">
     <label>slotDt:</label>
     <input id="slotDt" size="32" value="2025-12-05T19:00:00+09:00" />
@@ -325,7 +319,6 @@
     <span id="resultsStatus" class="status muted"></span>
   </div>
 
-  <!-- Matched groups table -->
   <div class="section-title">
     <span>Matched Groups</span>
     <span class="muted" id="groupsMeta"></span>
@@ -348,7 +341,6 @@
     <tbody id="resultsTbody"></tbody>
   </table>
 
-  <!-- Unmatched users -->
   <div class="section-title">
     <span>Unmatched Users</span>
     <span class="muted" id="unmatchedMeta"></span>
@@ -359,7 +351,6 @@
 
 <!-- ===== Drawer UI (User detail) ===== -->
 <div id="drawerBackdrop"></div>
-
 <aside id="drawer">
   <div class="drawer-header">
     <div>
@@ -371,7 +362,6 @@
       <button class="btn-danger" id="drawerClose">Close</button>
     </div>
   </div>
-
   <div id="drawerBody" class="muted">select a user…</div>
 </aside>
 
@@ -429,19 +419,49 @@
 <script>
   const $ = (id) => document.getElementById(id);
 
-  // ===== API prefix (Vercel: Express is mounted under /api) =====
-  const API_PREFIX = "/api";
-  const api = (path) => API_PREFIX + path;
+  /**
+   * Vercel/Express のマウント差異対策：
+   * - まず /api を付けて試す
+   * - 404/405 などでダメなら /api 無しでもう一度
+   *
+   * これで「/api 付きが正」の環境でも「/api 無しが正」の環境でも動きます。
+   */
+  const API_PREFIX_CANDIDATES = ["/api", ""]; // まず /api を優先
 
-  /* ===== Tabs ===== */
-  document.querySelectorAll(".tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
-      tab.classList.add("active");
-      $("tab-" + tab.dataset.tab).classList.add("active");
-    });
-  });
+  function joinPath(prefix, path) {
+    const p = String(prefix || "").replace(/\/+$/, "");
+    const q = String(path || "").startsWith("/") ? String(path || "") : ("/" + String(path || ""));
+    return (p ? p : "") + q;
+  }
+
+  async function fetchAuto(path, init = {}) {
+    let lastRes = null;
+
+    for (const prefix of API_PREFIX_CANDIDATES) {
+      const fullPath = joinPath(prefix, path);
+      try {
+        const res = await fetch(fullPath, init);
+        lastRes = res;
+
+        // 成功なら即返す
+        if (res.ok) return res;
+
+        // 404/405/501 など「そのルートが無い」系は次の候補へ
+        if ([404, 405, 501].includes(res.status)) continue;
+
+        // それ以外(401/403/500など)はルートは存在しそうなのでそのまま返す
+        return res;
+      } catch (e) {
+        // ネットワーク系は次候補も試す
+        lastRes = null;
+        continue;
+      }
+    }
+
+    // 全滅した場合：最後のレスポンスがあればそれを返す、なければ例外
+    if (lastRes) return lastRes;
+    throw new Error("network error");
+  }
 
   function tokenOrAlert() {
     const t = $("token").value.trim();
@@ -467,6 +487,16 @@
     catch { return String(iso); }
   }
 
+  /* ===== Tabs ===== */
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+      tab.classList.add("active");
+      $("tab-" + tab.dataset.tab).classList.add("active");
+    });
+  });
+
   /* ===== Drawer (User) ===== */
   let currentUserId = null;
 
@@ -481,24 +511,19 @@
 
   $("drawerClose").addEventListener("click", closeDrawer);
   $("drawerBackdrop").addEventListener("click", closeDrawer);
-
   $("drawerReload").addEventListener("click", () => {
     if (currentUserId != null) loadUserDetail(currentUserId);
   });
 
-  // ✅ KYC toggle
   async function toggleKyc(userId, next) {
     const token = tokenOrAlert(); if (!token) return;
 
-    const ok = confirm(next
-      ? "このユーザーをKYC承認しますか？"
-      : "KYC承認を解除しますか？"
-    );
+    const ok = confirm(next ? "このユーザーをKYC承認しますか？" : "KYC承認を解除しますか？");
     if (!ok) return;
 
     let res;
     try {
-      res = await fetch(api(`/admin/users/${userId}/kyc`), {
+      res = await fetchAuto(`/admin/users/${userId}/kyc`, {
         method: "POST",
         headers: {
           "Content-Type":"application/json",
@@ -512,11 +537,10 @@
     }
 
     if (!res.ok) {
-      alert(await res.text());
+      alert(await res.text().catch(() => ""));
       return;
     }
 
-    // 再読込
     loadUserDetail(userId);
   }
 
@@ -529,15 +553,11 @@
     $("drawerSub").textContent = "";
     $("drawerBody").innerHTML = "loading...";
 
-    const detailUrl = new URL(api(`/admin/users/${userId}`), location.origin);
-    const slotsUrl  = new URL(api(`/admin/users/${userId}/slots`), location.origin);
-    slotsUrl.searchParams.set("limit", "200");
-
     let r1, r2;
     try {
       [r1, r2] = await Promise.all([
-        fetch(detailUrl, { headers:{Authorization:`Bearer ${token}`} }),
-        fetch(slotsUrl,  { headers:{Authorization:`Bearer ${token}`} }),
+        fetchAuto(`/admin/users/${userId}`, { headers:{Authorization:`Bearer ${token}`} }),
+        fetchAuto(`/admin/users/${userId}/slots?limit=200`, { headers:{Authorization:`Bearer ${token}`} }),
       ]);
     } catch (e) {
       $("drawerBody").innerHTML = `<div class="status err">network error</div><pre class="mono">${esc(e?.message || String(e))}</pre>`;
@@ -545,16 +565,16 @@
     }
 
     if (!r1.ok) {
-      $("drawerBody").innerHTML = `<div class="status err">detail error: ${r1.status}</div><pre class="mono">${esc(await r1.text())}</pre>`;
+      $("drawerBody").innerHTML = `<div class="status err">detail error: ${r1.status}</div><pre class="mono">${esc(await r1.text().catch(()=>""))}</pre>`;
       return;
     }
     if (!r2.ok) {
-      $("drawerBody").innerHTML = `<div class="status err">slots error: ${r2.status}</div><pre class="mono">${esc(await r2.text())}</pre>`;
+      $("drawerBody").innerHTML = `<div class="status err">slots error: ${r2.status}</div><pre class="mono">${esc(await r2.text().catch(()=>""))}</pre>`;
       return;
     }
 
-    const d = await r1.json();
-    const s = await r2.json();
+    const d = await r1.json().catch(() => ({}));
+    const s = await r2.json().catch(() => ({}));
 
     const u = d.user || {};
     const slots = (s.slots || []);
@@ -577,7 +597,6 @@
       </tr>
     `).join("");
 
-    // ✅ Photo (prefer masked)
     const photoUrl = u.photo_masked_url || u.photo_url || "";
     const photoHtml = photoUrl ? `
       <div style="display:flex; align-items:center; gap:12px; margin: 8px 0 10px;">
@@ -589,11 +608,8 @@
         />
         <div class="muted" style="font-size:12px;">photo</div>
       </div>
-    ` : `
-      <div class="muted" style="margin: 8px 0 10px; font-size:12px;">photo: —</div>
-    `;
+    ` : `<div class="muted" style="margin: 8px 0 10px; font-size:12px;">photo: —</div>`;
 
-    // ✅ KYC
     const kycHtml = `
       <div style="margin: 6px 0 10px;">
         <b>KYC:</b>
@@ -694,7 +710,6 @@
     $("opsSub").textContent =
       `group_id=${g.groupId} / token=${g.token} / slot=${fmtDateJa(g.slotDt)} / ${g.location} / ${g.typeMode}`;
 
-    // 公開ページリンク（フロント）
     const publicUrl = `https://thematching-frontend.vercel.app/g/${encodeURIComponent(g.token)}`;
     $("opsPublicLink").href = publicUrl;
   }
@@ -704,8 +719,7 @@
 
     let res;
     try {
-      // 公開API（完全共有型）で group を取得（venue/fee/notesを含む想定）
-      res = await fetch(api(`/groups/${encodeURIComponent(token)}`), { method: "GET" });
+      res = await fetchAuto(`/groups/${encodeURIComponent(token)}`, { method: "GET" });
     } catch (e) {
       setStatus($("opsStatus"), "network error", "err");
       alert(e?.message || String(e));
@@ -719,7 +733,7 @@
       return;
     }
 
-    const data = await res.json().catch(() => null);
+    const data = await res.json().catch(() => ({}));
     const grp = data?.group || {};
 
     $("opsVenueName").value = grp.venue_name ?? "";
@@ -746,9 +760,7 @@
 
     let res;
     try {
-      // ★要：backendで実装するAdmin API
-      // 例: PATCH /admin/groups/:groupId/ops-message
-      res = await fetch(api(`/admin/groups/${encodeURIComponent(groupId)}/ops-message`), {
+      res = await fetchAuto(`/admin/groups/${encodeURIComponent(groupId)}/ops-message`, {
         method: "PATCH",
         headers: {
           "Content-Type":"application/json",
@@ -765,35 +777,28 @@
     if (!res.ok) {
       const t = await res.text().catch(() => "");
       setStatus($("opsStatus"), `save error ${res.status}`, "err");
-      alert(
-        (t || "").slice(0, 2000) ||
-        `save error ${res.status}\n(backendに /admin/groups/:id/ops-message の実装が必要かもしれません)`
-      );
+      alert((t || "").slice(0, 2000) || `save error ${res.status}`);
       return;
     }
 
     setStatus($("opsStatus"), "saved", "ok");
-
-    // 念のため再ロードして整合させる
-    if (currentGroup?.token) {
-      await loadOpsMessage(currentGroup.token);
-    }
+    if (currentGroup?.token) await loadOpsMessage(currentGroup.token);
   }
 
-  // results rowから呼ぶ
   async function openOpsEditorFromRow(groupId, token, slotDt, location, typeMode, status) {
     currentGroup = { groupId, token, slotDt, location, typeMode, status };
     setOpsHeader();
     openOpsModal();
     await loadOpsMessage(token);
   }
-  window.openOpsEditorFromRow = openOpsEditorFromRow; // inline onclick用
+  window.openOpsEditorFromRow = openOpsEditorFromRow;
 
   /* ===== Load Users ===== */
   $("loadUsers").onclick = async () => {
     const token = tokenOrAlert(); if (!token) return;
 
-    const url = new URL(api("/admin/users"), location.origin);
+    const url = new URL(location.origin);
+    url.pathname = joinPath(API_PREFIX_CANDIDATES[0], "/admin/users"); // 表示用（実際のfetchはfetchAutoでフォールバック）
     if ($("gender").value) url.searchParams.set("gender", $("gender").value);
     if ($("q").value) url.searchParams.set("q", $("q").value);
     url.searchParams.set("limit", "300");
@@ -803,7 +808,9 @@
 
     let res;
     try {
-      res = await fetch(url, { headers:{Authorization:`Bearer ${token}`}});
+      // クエリ付きは fetchAuto にそのまま投げる（/api→無しの順で試す）
+      const pathWithQuery = `/admin/users?${url.searchParams.toString()}`;
+      res = await fetchAuto(pathWithQuery, { headers:{Authorization:`Bearer ${token}`}});
     } catch (e) {
       setStatus($("usersStatus"), "network error", "err");
       alert(e?.message || String(e));
@@ -812,12 +819,12 @@
 
     if (!res.ok) {
       setStatus($("usersStatus"), `error ${res.status}`, "err");
-      alert(await res.text());
+      alert(await res.text().catch(() => ""));
       return;
     }
 
-    const data = await res.json();
-    setStatus($("usersStatus"), `loaded ${data.count}`, "ok");
+    const data = await res.json().catch(() => ({}));
+    setStatus($("usersStatus"), `loaded ${data.count ?? 0}`, "ok");
 
     $("usersTbody").innerHTML = (data.users || []).map(u => {
       const age = (u.age === 0 || u.age === "0") ? "—" : (u.age ?? "—");
@@ -835,7 +842,6 @@
       `;
     }).join("") || `<tr><td colspan="7" class="muted">no users</td></tr>`;
 
-    // 行クリック → ドロワー
     document.querySelectorAll("tr.user-row[data-user-id]").forEach(tr => {
       tr.addEventListener("click", () => {
         const id = tr.getAttribute("data-user-id");
@@ -854,7 +860,7 @@
 
     let res;
     try {
-      res = await fetch(api("/cron/matching/manual"), {
+      res = await fetchAuto("/cron/matching/manual", {
         method: "POST",
         headers: {
           "Content-Type":"application/json",
@@ -870,7 +876,7 @@
 
     if (!res.ok) {
       setStatus($("resultsStatus"), `error ${res.status}`, "err");
-      alert(await res.text());
+      alert(await res.text().catch(() => ""));
       return;
     }
 
@@ -884,9 +890,6 @@
     const slotDt = $("slotDt").value.trim();
     if (!slotDt) return alert("slotDt を入力してください");
 
-    const url = new URL(api("/admin/matching-results"), location.origin);
-    url.searchParams.set("slotDt", slotDt);
-
     setStatus($("resultsStatus"), "loading...", null);
     $("resultsTbody").innerHTML = "";
     $("unmatchedWrap").innerHTML = "";
@@ -895,7 +898,8 @@
 
     let res;
     try {
-      res = await fetch(url, { headers:{Authorization:`Bearer ${token}`}});
+      const qs = new URLSearchParams({ slotDt }).toString();
+      res = await fetchAuto(`/admin/matching-results?${qs}`, { headers:{Authorization:`Bearer ${token}`}});
     } catch (e) {
       setStatus($("resultsStatus"), "network error", "err");
       alert(e?.message || String(e));
@@ -904,14 +908,13 @@
 
     if (!res.ok) {
       setStatus($("resultsStatus"), `error ${res.status}`, "err");
-      alert(await res.text());
+      alert(await res.text().catch(() => ""));
       return;
     }
 
-    const data = await res.json();
-    setStatus($("resultsStatus"), `loaded ${data.count}`, "ok");
+    const data = await res.json().catch(() => ({}));
+    setStatus($("resultsStatus"), `loaded ${data.count ?? 0}`, "ok");
 
-    // ---- Matched Groups
     $("groupsMeta").textContent = `${(data.count ?? 0)} groups`;
 
     const renderPerson = p => `
@@ -959,7 +962,6 @@
       `;
     }).join("") || `<tr><td colspan="9" class="muted">no results</td></tr>`;
 
-    // ---- Unmatched Users
     const unmatched = data.unmatchedUsers || [];
     const unmatchedCount = (data.unmatchedCount != null) ? data.unmatchedCount : unmatched.length;
     $("unmatchedMeta").textContent = `${unmatchedCount} users`;
@@ -985,7 +987,6 @@
       `;
     }).join("");
 
-    // unmatched card click -> drawer
     document.querySelectorAll('#unmatchedWrap [data-user-id]').forEach(el => {
       el.addEventListener('click', () => {
         const id = el.getAttribute('data-user-id');
