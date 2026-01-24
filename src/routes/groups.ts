@@ -8,7 +8,9 @@ const router = Router();
  * GET /groups/:token
  * - 完全共有型（認証なし）
  * - token 有効期限：イベント（slot_dt）翌日いっぱい（JST）まで
+ *   - 判定しやすいよう expires_at = 「slot日の翌々日 00:00 JST」(直前まで有効) を採用
  * - 表示：nickname / age / gender / occupation / photo（masked優先、なければ通常）
+ * - ★追加：運営メッセージ（店情報/料金/地図/注意事項）を group に含めて返す
  */
 router.get("/:token", async (req, res) => {
   const token = String(req.params.token || "").trim();
@@ -28,6 +30,14 @@ router.get("/:token", async (req, res) => {
         location,
         type_mode,
         status,
+
+        -- ★運営メッセージ（matched_groupsに追加したカラム）
+        venue_name,
+        venue_address,
+        venue_map_url,
+        fee_text,
+        notes,
+
         (slot_dt AT TIME ZONE 'Asia/Tokyo') AS slot_jst,
         (
           (date_trunc('day', slot_dt AT TIME ZONE 'Asia/Tokyo') + interval '2 day')
@@ -78,11 +88,18 @@ router.get("/:token", async (req, res) => {
         id: Number(group.id),
         token: group.token,
         status: group.status,
-        slot_dt: group.slot_dt,      // ISO (timestamptz)
-        slot_jst: group.slot_jst,    // "YYYY-MM-DD HH:MM:SS"
+        slot_dt: group.slot_dt, // ISO (timestamptz)
+        slot_jst: group.slot_jst, // "YYYY-MM-DD HH:MM:SS"（node-postgresの型変換次第でISO文字列になることもあり）
         location: group.location,
         type_mode: group.type_mode,
-        expires_at: group.expires_at // ISO (timestamptz)
+        expires_at: group.expires_at, // ISO (timestamptz)
+
+        // ★運営メッセージ（null許容で返す）
+        venue_name: group.venue_name ?? null,
+        venue_address: group.venue_address ?? null,
+        venue_map_url: group.venue_map_url ?? null,
+        fee_text: group.fee_text ?? null,
+        notes: group.notes ?? null,
       },
       members: mRes.rows.map((r: any) => ({
         user_id: Number(r.user_id),

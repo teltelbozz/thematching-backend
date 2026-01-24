@@ -41,7 +41,7 @@
       flex-wrap: wrap;
       margin-bottom: 8px;
     }
-    input, select, button {
+    input, select, button, textarea {
       padding: 8px 10px;
       font-size: 14px;
     }
@@ -180,6 +180,77 @@
       font-size: 12px;
       color: #555;
     }
+
+    /* ===== Ops Message Modal ===== */
+    #opsBackdrop {
+      display:none;
+      position:fixed;
+      inset:0;
+      background: rgba(0,0,0,.25);
+      z-index: 60;
+    }
+    #opsModal {
+      display:none;
+      position:fixed;
+      inset: 0;
+      margin:auto;
+      width: min(760px, 92vw);
+      height: min(86vh, 860px);
+      background:#fff;
+      border: 1px solid #eee;
+      border-radius: 14px;
+      box-shadow: 0 18px 60px rgba(0,0,0,.18);
+      padding: 14px;
+      overflow:auto;
+      z-index: 70;
+    }
+    .ops-header {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .ops-title { font-weight: 800; }
+    .ops-sub { margin-top: 2px; }
+    .ops-grid {
+      display:grid;
+      grid-template-columns: 160px 1fr;
+      gap: 10px 12px;
+      margin-top: 10px;
+    }
+    .ops-grid .k { font-size: 12px; color:#555; padding-top: 8px; }
+    .ops-grid input, .ops-grid textarea {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      outline: none;
+    }
+    .ops-grid textarea {
+      min-height: 110px;
+      resize: vertical;
+      line-height: 1.5;
+    }
+    .ops-actions {
+      display:flex;
+      justify-content: space-between;
+      align-items:center;
+      gap: 10px;
+      margin-top: 12px;
+      border-top: 1px solid #eee;
+      padding-top: 12px;
+    }
+    .ops-help {
+      font-size: 12px;
+      color: #666;
+      line-height: 1.45;
+    }
+    .link {
+      color: #0070f3;
+      text-decoration: none;
+    }
+    .link:hover { text-decoration: underline; }
   </style>
 </head>
 
@@ -269,6 +340,7 @@
         <th>Type</th>
         <th>Status</th>
         <th>Token</th>
+        <th>Ops Msg</th>
         <th>Female</th>
         <th>Male</th>
       </tr>
@@ -285,7 +357,7 @@
   <div id="unmatchedWrap" class="grid"></div>
 </div>
 
-<!-- ===== Drawer UI ===== -->
+<!-- ===== Drawer UI (User detail) ===== -->
 <div id="drawerBackdrop"></div>
 
 <aside id="drawer">
@@ -302,6 +374,57 @@
 
   <div id="drawerBody" class="muted">select a user…</div>
 </aside>
+
+<!-- ===== Ops Message Modal ===== -->
+<div id="opsBackdrop"></div>
+<div id="opsModal" role="dialog" aria-modal="true" aria-label="運営メッセージ編集">
+  <div class="ops-header">
+    <div>
+      <div class="ops-title">運営メッセージ編集</div>
+      <div class="ops-sub muted" id="opsSub">—</div>
+      <div class="muted" style="margin-top:6px;">
+        公開ページ:
+        <a id="opsPublicLink" class="link" href="#" target="_blank" rel="noreferrer">open</a>
+        <span class="muted">（/g/:token）</span>
+      </div>
+    </div>
+    <div class="row" style="margin:0; gap:8px;">
+      <button class="btn-ghost" id="opsReload">Reload</button>
+      <button class="btn-danger" id="opsClose">Close</button>
+    </div>
+  </div>
+
+  <div class="ops-grid">
+    <div class="k">店名（venue_name）</div>
+    <div><input id="opsVenueName" placeholder="例）渋谷ワイン食堂 XXX" /></div>
+
+    <div class="k">住所（venue_address）</div>
+    <div><input id="opsVenueAddress" placeholder="例）東京都渋谷区..." /></div>
+
+    <div class="k">地図URL（venue_map_url）</div>
+    <div><input id="opsVenueMapUrl" placeholder="Google Map URL など" /></div>
+
+    <div class="k">料金（fee_text）</div>
+    <div><textarea id="opsFeeText" placeholder="例）男性 6,000円 / 女性 3,000円（現金）"></textarea></div>
+
+    <div class="k">注意事項/連絡（notes）</div>
+    <div><textarea id="opsNotes" placeholder="例）開始10分前に集合 / 遅刻時はLINE連絡 など"></textarea></div>
+  </div>
+
+  <div class="ops-actions">
+    <div>
+      <span id="opsStatus" class="status muted"></span>
+      <div class="ops-help">
+        ※ 保存は Admin API（Bearer Token）でDBへ反映します。<br/>
+        ※ 反映後、公開ページ（/g/:token）側で同内容が表示されます。
+      </div>
+    </div>
+    <div class="row" style="margin:0; gap:8px;">
+      <button class="btn-ghost" id="opsClear">Clear</button>
+      <button class="btn-primary" id="opsSave">Save</button>
+    </div>
+  </div>
+</div>
 
 <script>
   const $ = (id) => document.getElementById(id);
@@ -340,7 +463,7 @@
     catch { return String(iso); }
   }
 
-  /* ===== Drawer ===== */
+  /* ===== Drawer (User) ===== */
   let currentUserId = null;
 
   function openDrawer() {
@@ -523,6 +646,145 @@
     `;
   }
 
+  /* ===== Ops Message Modal ===== */
+  let currentGroup = null; // { groupId, token, slotDt, location, typeMode, status }
+
+  function openOpsModal() {
+    $("opsBackdrop").style.display = "block";
+    $("opsModal").style.display = "block";
+  }
+  function closeOpsModal() {
+    $("opsBackdrop").style.display = "none";
+    $("opsModal").style.display = "none";
+  }
+
+  $("opsClose").addEventListener("click", closeOpsModal);
+  $("opsBackdrop").addEventListener("click", closeOpsModal);
+
+  $("opsClear").addEventListener("click", () => {
+    $("opsVenueName").value = "";
+    $("opsVenueAddress").value = "";
+    $("opsVenueMapUrl").value = "";
+    $("opsFeeText").value = "";
+    $("opsNotes").value = "";
+    setStatus($("opsStatus"), "cleared", null);
+  });
+
+  $("opsReload").addEventListener("click", async () => {
+    if (!currentGroup?.token) return;
+    await loadOpsMessage(currentGroup.token);
+  });
+
+  $("opsSave").addEventListener("click", async () => {
+    if (!currentGroup?.groupId) return alert("group is not selected");
+    await saveOpsMessage(currentGroup.groupId);
+  });
+
+  function setOpsHeader() {
+    const g = currentGroup;
+    if (!g) {
+      $("opsSub").textContent = "—";
+      $("opsPublicLink").href = "#";
+      return;
+    }
+    $("opsSub").textContent =
+      `group_id=${g.groupId} / token=${g.token} / slot=${fmtDateJa(g.slotDt)} / ${g.location} / ${g.typeMode}`;
+
+    // 公開ページリンク（フロント）
+    const publicUrl = `https://thematching-frontend.vercel.app/g/${encodeURIComponent(g.token)}`;
+    $("opsPublicLink").href = publicUrl;
+  }
+
+  async function loadOpsMessage(token) {
+    setStatus($("opsStatus"), "loading...", null);
+
+    let res;
+    try {
+      // 公開API（完全共有型）で group を取得（venue/fee/notesを含む想定）
+      res = await fetch(`/groups/${encodeURIComponent(token)}`, { method: "GET" });
+    } catch (e) {
+      setStatus($("opsStatus"), "network error", "err");
+      alert(e?.message || String(e));
+      return;
+    }
+
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      setStatus($("opsStatus"), `load error ${res.status}`, "err");
+      alert(t || `load error ${res.status}`);
+      return;
+    }
+
+    const data = await res.json().catch(() => null);
+    const grp = data?.group || {};
+
+    $("opsVenueName").value = grp.venue_name ?? "";
+    $("opsVenueAddress").value = grp.venue_address ?? "";
+    $("opsVenueMapUrl").value = grp.venue_map_url ?? "";
+    $("opsFeeText").value = grp.fee_text ?? "";
+    $("opsNotes").value = grp.notes ?? "";
+
+    setStatus($("opsStatus"), "loaded", "ok");
+  }
+
+  async function saveOpsMessage(groupId) {
+    const token = tokenOrAlert(); if (!token) return;
+
+    const payload = {
+      venue_name: $("opsVenueName").value.trim() || null,
+      venue_address: $("opsVenueAddress").value.trim() || null,
+      venue_map_url: $("opsVenueMapUrl").value.trim() || null,
+      fee_text: $("opsFeeText").value.trim() || null,
+      notes: $("opsNotes").value.trim() || null,
+    };
+
+    setStatus($("opsStatus"), "saving...", null);
+
+    let res;
+    try {
+      // ★要：backendで実装するAdmin API
+      // 例: PATCH /admin/groups/:groupId/ops-message
+      res = await fetch(`/admin/groups/${encodeURIComponent(groupId)}/ops-message`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type":"application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      setStatus($("opsStatus"), "network error", "err");
+      alert(e?.message || String(e));
+      return;
+    }
+
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      setStatus($("opsStatus"), `save error ${res.status}`, "err");
+      alert(
+        (t || "").slice(0, 2000) ||
+        `save error ${res.status}\n(backendに /admin/groups/:id/ops-message の実装が必要かもしれません)`
+      );
+      return;
+    }
+
+    setStatus($("opsStatus"), "saved", "ok");
+
+    // 念のため再ロードして整合させる
+    if (currentGroup?.token) {
+      await loadOpsMessage(currentGroup.token);
+    }
+  }
+
+  // results rowから呼ぶ
+  async function openOpsEditorFromRow(groupId, token, slotDt, location, typeMode, status) {
+    currentGroup = { groupId, token, slotDt, location, typeMode, status };
+    setOpsHeader();
+    openOpsModal();
+    await loadOpsMessage(token);
+  }
+  window.openOpsEditorFromRow = openOpsEditorFromRow; // inline onclick用
+
   /* ===== Load Users ===== */
   $("loadUsers").onclick = async () => {
     const token = tokenOrAlert(); if (!token) return;
@@ -657,18 +919,41 @@
       </div>
     `;
 
-    $("resultsTbody").innerHTML = (data.groups || []).map(g => `
-      <tr>
-        <td class="mono">${esc(g.groupId)}</td>
-        <td>${esc(fmtDateJa(g.slotDt))}</td>
-        <td>${esc(g.location)}</td>
-        <td>${esc(g.typeMode)}</td>
-        <td>${esc(g.status)}</td>
-        <td class="mono">${esc(g.token || "")}</td>
-        <td>${(g.female || []).map(renderPerson).join("")}</td>
-        <td>${(g.male || []).map(renderPerson).join("")}</td>
-      </tr>
-    `).join("") || `<tr><td colspan="8" class="muted">no results</td></tr>`;
+    $("resultsTbody").innerHTML = (data.groups || []).map(g => {
+      const groupId = g.groupId;
+      const token = g.token || "";
+      const slotDt = g.slotDt || "";
+      const location = g.location || "";
+      const typeMode = g.typeMode || "";
+      const status = g.status || "";
+
+      const btnDisabled = token ? "" : "disabled";
+      const btnTitle = token ? "運営メッセージ編集" : "tokenが無いので編集不可";
+
+      return `
+        <tr>
+          <td class="mono">${esc(groupId)}</td>
+          <td>${esc(fmtDateJa(slotDt))}</td>
+          <td>${esc(location)}</td>
+          <td>${esc(typeMode)}</td>
+          <td>${esc(status)}</td>
+          <td class="mono">${esc(token)}</td>
+          <td>
+            <button
+              class="btn-ghost"
+              ${btnDisabled}
+              title="${esc(btnTitle)}"
+              onclick="openOpsEditorFromRow('${esc(groupId)}','${esc(token)}','${esc(slotDt)}','${esc(location)}','${esc(typeMode)}','${esc(status)}')"
+            >運営メッセージ</button>
+            <div class="mini muted" style="margin-top:6px;">
+              <a class="link" href="https://thematching-frontend.vercel.app/g/${encodeURIComponent(token)}" target="_blank" rel="noreferrer">公開ページ</a>
+            </div>
+          </td>
+          <td>${(g.female || []).map(renderPerson).join("")}</td>
+          <td>${(g.male || []).map(renderPerson).join("")}</td>
+        </tr>
+      `;
+    }).join("") || `<tr><td colspan="9" class="muted">no results</td></tr>`;
 
     // ---- Unmatched Users
     const unmatched = data.unmatchedUsers || [];
