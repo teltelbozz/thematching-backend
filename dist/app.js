@@ -27,6 +27,9 @@ const terms_1 = __importDefault(require("./routes/terms"));
 const blob_1 = __importDefault(require("./routes/blob"));
 // ★ グループページ
 const groupPublic_1 = __importDefault(require("./routes/groupPublic"));
+// ★ 管理画面：グループお知らせ更新
+const adminGroupAnnouncement_1 = __importDefault(require("./routes/adminGroupAnnouncement"));
+const adminGroups_1 = __importDefault(require("./routes/adminGroups"));
 const app = (0, express_1.default)();
 // Vercel/プロキシ越しでも Secure Cookie を有効化
 app.set("trust proxy", 1);
@@ -63,4 +66,6 @@ app.use("/admin", adminUserDetail_1.default);
 app.use(express_1.default.static(path_1.default.join(__dirname, "public")));
 // ★ グループページ（完全共有型）
 app.use("/api/g", groupPublic_1.default);
+app.use("/api/admin", adminGroupAnnouncement_1.default);
+app.use("/admin", adminGroups_1.default);
 exports.default = app;

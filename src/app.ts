@@ -27,6 +27,10 @@ import blobRoutes from "./routes/blob";
 // ★ グループページ
 import groupPublicRouter from "./routes/groupPublic";
 
+// ★ 管理画面：グループお知らせ更新
+import adminGroupAnnouncementRouter from "./routes/adminGroupAnnouncement";
+import adminGroupsRouter from "./routes/adminGroups";
+
 const app = express();
 
 // Vercel/プロキシ越しでも Secure Cookie を有効化
@@ -77,5 +81,7 @@ app.use(express.static(path.join(__dirname, "public")));
 // ★ グループページ（完全共有型）
 app.use("/api/g", groupPublicRouter);
 
+app.use("/api/admin", adminGroupAnnouncementRouter);
+app.use("/admin", adminGroupsRouter);
 
 export default app;

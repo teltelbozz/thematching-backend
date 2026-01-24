@@ -429,6 +429,10 @@
 <script>
   const $ = (id) => document.getElementById(id);
 
+  // ===== API prefix (Vercel: Express is mounted under /api) =====
+  const API_PREFIX = "/api";
+  const api = (path) => API_PREFIX + path;
+
   /* ===== Tabs ===== */
   document.querySelectorAll(".tab").forEach(tab => {
     tab.addEventListener("click", () => {
@@ -494,7 +498,7 @@
 
     let res;
     try {
-      res = await fetch(`/admin/users/${userId}/kyc`, {
+      res = await fetch(api(`/admin/users/${userId}/kyc`), {
         method: "POST",
         headers: {
           "Content-Type":"application/json",
@@ -525,8 +529,8 @@
     $("drawerSub").textContent = "";
     $("drawerBody").innerHTML = "loading...";
 
-    const detailUrl = new URL(`/admin/users/${userId}`, location.origin);
-    const slotsUrl  = new URL(`/admin/users/${userId}/slots`, location.origin);
+    const detailUrl = new URL(api(`/admin/users/${userId}`), location.origin);
+    const slotsUrl  = new URL(api(`/admin/users/${userId}/slots`), location.origin);
     slotsUrl.searchParams.set("limit", "200");
 
     let r1, r2;
@@ -701,7 +705,7 @@
     let res;
     try {
       // 公開API（完全共有型）で group を取得（venue/fee/notesを含む想定）
-      res = await fetch(`/groups/${encodeURIComponent(token)}`, { method: "GET" });
+      res = await fetch(api(`/groups/${encodeURIComponent(token)}`), { method: "GET" });
     } catch (e) {
       setStatus($("opsStatus"), "network error", "err");
       alert(e?.message || String(e));
@@ -744,7 +748,7 @@
     try {
       // ★要：backendで実装するAdmin API
       // 例: PATCH /admin/groups/:groupId/ops-message
-      res = await fetch(`/admin/groups/${encodeURIComponent(groupId)}/ops-message`, {
+      res = await fetch(api(`/admin/groups/${encodeURIComponent(groupId)}/ops-message`), {
         method: "PATCH",
         headers: {
           "Content-Type":"application/json",
@@ -789,7 +793,7 @@
   $("loadUsers").onclick = async () => {
     const token = tokenOrAlert(); if (!token) return;
 
-    const url = new URL("/admin/users", location.origin);
+    const url = new URL(api("/admin/users"), location.origin);
     if ($("gender").value) url.searchParams.set("gender", $("gender").value);
     if ($("q").value) url.searchParams.set("q", $("q").value);
     url.searchParams.set("limit", "300");
@@ -850,7 +854,7 @@
 
     let res;
     try {
-      res = await fetch("/cron/matching/manual", {
+      res = await fetch(api("/cron/matching/manual"), {
         method: "POST",
         headers: {
           "Content-Type":"application/json",
@@ -880,7 +884,7 @@
     const slotDt = $("slotDt").value.trim();
     if (!slotDt) return alert("slotDt を入力してください");
 
-    const url = new URL("/admin/matching-results", location.origin);
+    const url = new URL(api("/admin/matching-results"), location.origin);
     url.searchParams.set("slotDt", slotDt);
 
     setStatus($("resultsStatus"), "loading...", null);
