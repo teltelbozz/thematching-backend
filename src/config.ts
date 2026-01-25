@@ -24,8 +24,10 @@ const config = {
   line: {
     issuer: env.LINE_ISSUER || 'https://access.line.me',
     channelId: must(env.LINE_CHANNEL_ID, 'LINE_CHANNEL_ID'),
+    channelAccessToken: env.LINE_CHANNEL_ACCESS_TOKEN || "", // mustにするかは好み
   },
 };
+
 
 export default config;
 export type AppConfig = typeof config;

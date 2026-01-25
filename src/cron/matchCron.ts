@@ -8,6 +8,8 @@ import {
   saveMatchesForSlot,
   assignTokensForSlot,
 } from "../services/matching";
+import { enqueueLineNotificationsForSlot } from "../services/notifications/enqueueLineNotifications";
+
 
 // JST 日付を YYYY-MM-DD 形式で取得
 function getJstDateKey(offsetDays = 1): string {
@@ -156,6 +158,9 @@ export async function executeMatchCron(pool: Pool) {
 
       // ⑥ token 付与
       await assignTokensForSlot(pool, slotDt, location, typeMode);
+
+      // ★追加：通知キューに積む
+      await enqueueLineNotificationsForSlot(pool, slotDt);
 
       results.push({
         slotDt,

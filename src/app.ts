@@ -31,6 +31,9 @@ import groupPublicRouter from "./routes/groupPublic";
 import adminGroupAnnouncementRouter from "./routes/adminGroupAnnouncement";
 import adminGroupsRouter from "./routes/adminGroups";
 
+// ★ LINE通知キュー処理  
+import cronLineDispatchRouter from "./routes/cronLineDispatch";
+
 const app = express();
 
 // Vercel/プロキシ越しでも Secure Cookie を有効化
@@ -83,5 +86,11 @@ app.use("/api/g", groupPublicRouter);
 
 app.use("/api/admin", adminGroupAnnouncementRouter);
 app.use("/admin", adminGroupsRouter);
+
+//LINE通知キュー処理  
+app.use("/cron", cronRouter);
+app.use("/cron", cronLineDispatchRouter);
+app.use("/api/cron", cronRouter); 
+app.use("/api/cron", cronLineDispatchRouter);
 
 export default app;

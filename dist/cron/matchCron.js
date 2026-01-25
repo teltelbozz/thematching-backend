@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.executeMatchCron = executeMatchCron;
 const matching_1 = require("../services/matching");
+const enqueueLineNotifications_1 = require("../services/notifications/enqueueLineNotifications");
 // JST 日付を YYYY-MM-DD 形式で取得
 function getJstDateKey(offsetDays = 1) {
     const now = new Date(Date.now() + 9 * 3600 * 1000); // JST
@@ -108,6 +109,8 @@ async function executeMatchCron(pool) {
             await (0, matching_1.saveMatchesForSlot)(pool, slotDt, location, typeMode, matched);
             // ⑥ token 付与
             await (0, matching_1.assignTokensForSlot)(pool, slotDt, location, typeMode);
+            // ★追加：通知キューに積む
+            await (0, enqueueLineNotifications_1.enqueueLineNotificationsForSlot)(pool, slotDt);
             results.push({
                 slotDt,
                 matchedCount: matched.length,

@@ -30,6 +30,8 @@ const groupPublic_1 = __importDefault(require("./routes/groupPublic"));
 // ★ 管理画面：グループお知らせ更新
 const adminGroupAnnouncement_1 = __importDefault(require("./routes/adminGroupAnnouncement"));
 const adminGroups_1 = __importDefault(require("./routes/adminGroups"));
+// ★ LINE通知キュー処理  
+const cronLineDispatch_1 = __importDefault(require("./routes/cronLineDispatch"));
 const app = (0, express_1.default)();
 // Vercel/プロキシ越しでも Secure Cookie を有効化
 app.set("trust proxy", 1);
@@ -68,4 +70,9 @@ app.use(express_1.default.static(path_1.default.join(__dirname, "public")));
 app.use("/api/g", groupPublic_1.default);
 app.use("/api/admin", adminGroupAnnouncement_1.default);
 app.use("/admin", adminGroups_1.default);
+//LINE通知キュー処理  
+app.use("/cron", cron_1.default);
+app.use("/cron", cronLineDispatch_1.default);
+app.use("/api/cron", cron_1.default);
+app.use("/api/cron", cronLineDispatch_1.default);
 exports.default = app;

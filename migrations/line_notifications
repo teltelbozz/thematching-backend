@@ -1,0 +1,28 @@
+-- migrations/20260125_create_line_notifications.sql
+
+CREATE TABLE IF NOT EXISTS line_notifications (
+  id BIGSERIAL PRIMARY KEY,
+
+  group_id BIGINT NOT NULL,
+  user_id  BIGINT NOT NULL,
+  line_user_id TEXT NOT NULL,
+
+  -- まずはテキスト1通で運用
+  message_text TEXT NOT NULL,
+
+  status TEXT NOT NULL DEFAULT 'pending', -- pending|processing|sent|failed
+  attempts INT NOT NULL DEFAULT 0,
+  next_retry_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_error TEXT NULL,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sent_at TIMESTAMPTZ NULL
+);
+
+-- 同一ユーザー×同一グループへの重複通知を防ぐ
+CREATE UNIQUE INDEX IF NOT EXISTS uq_line_notifications_group_user
+  ON line_notifications(group_id, user_id);
+
+-- dispatchが拾いやすいindex
+CREATE INDEX IF NOT EXISTS idx_line_notifications_dispatch
+  ON line_notifications(status, next_retry_at);

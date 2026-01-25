@@ -47,6 +47,7 @@ export async function runMatchingForSlot(db: Pool, slotDt: string) {
 
     // 5. token をセット
     await assignTokensForSlot(db, slotDt, first.location, first.type_mode);
+
   }
 
   return {
