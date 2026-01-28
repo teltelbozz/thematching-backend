@@ -24,7 +24,13 @@ router.get("/", async (req, res) => {
         u.id AS user_id,
         EXISTS (SELECT 1 FROM user_profiles p2 WHERE p2.user_id = u.id) AS has_profile,
         p.gender AS gender,
-        p.verified_age AS verified_age
+
+        -- 既存
+        p.verified_age AS verified_age,
+
+        -- ✅ 追加：KYC
+        p.kyc_verified AS kyc_verified,
+        p.kyc_verified_at AS kyc_verified_at
       FROM users u
       LEFT JOIN user_profiles p ON p.user_id = u.id
       WHERE u.id = $1 OR u.line_user_id = $2
@@ -60,20 +66,28 @@ router.get("/", async (req, res) => {
             acceptedTermsVersion = accepted?.version ?? null;
             needsTermsAcceptance = !accepted;
         }
-        // ✅ KYC: verified_age が false なら未完了扱い（profileが無い時は “登録が先”）
         const hasProfile = !!row.has_profile;
+        // 既存の返却（残したければ維持）
         const verifiedAge = typeof row.verified_age === "boolean" ? row.verified_age : null;
-        const needsKyc = hasProfile && verifiedAge === false;
+        // ✅ KYCは kyc_verified を正にする（NULLはfalse扱い）
+        const kycVerified = Boolean(row.kyc_verified);
+        const kycVerifiedAt = row.kyc_verified_at ?? null;
+        // ✅ profileが無ければ「KYC以前にプロフィール登録が必要」なので needsKyc=false（ここは好み）
+        // フロント側の導線に合わせるなら、hasProfile=false のときは needsKyc=false が自然
+        const needsKyc = hasProfile && !kycVerified;
         return res.json({
-            userId: row.user_id,
+            userId: Number(row.user_id),
             hasProfile,
             gender,
             // terms
             needsTermsAcceptance,
             currentTermsVersion,
             acceptedTermsVersion,
-            // kyc
+            // 既存
             verifiedAge,
+            // ✅ KYC（統一）
+            kycVerified,
+            kycVerifiedAt,
             needsKyc,
         });
     }

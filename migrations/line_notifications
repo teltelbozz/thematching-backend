@@ -26,3 +26,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_line_notifications_group_user
 -- dispatchが拾いやすいindex
 CREATE INDEX IF NOT EXISTS idx_line_notifications_dispatch
   ON line_notifications(status, next_retry_at);
+
+  -- 1) line_user_id を NULL 許容に（dispatch時に users から引けるように）
+ALTER TABLE line_notifications
+  ALTER COLUMN line_user_id DROP NOT NULL;
+
+-- 2) dispatchの安全性向上（processing が詰んだ時の再実行を可能に）
+--    ※ locked_at / updated_at がないので、最小限なら status を pending に戻す運用でもOK

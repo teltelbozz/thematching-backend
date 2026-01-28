@@ -105,6 +105,16 @@ router.put('/', async (req, res) => {
     const now = new Date();
     const weekKey = toWeekKeyJST(now);
     const client = await db_1.pool.connect();
+    // setup.ts の router.put の最初の方に追加（validatePayloadの後くらいでOK）
+    const prof = await client.query(`SELECT COALESCE(kyc_verified,false) AS kyc_verified
+    FROM user_profiles
+    WHERE user_id = $1`, [userId]);
+    // rowCount を使わない
+    const kycOk = prof.rows.length > 0 && Boolean(prof.rows[0].kyc_verified);
+    if (!kycOk) {
+        await client.query("ROLLBACK");
+        return res.status(403).json({ error: "kyc_required" });
+    }
     try {
         await client.query('BEGIN');
         const inserted = await client.query(`INSERT INTO user_setup
