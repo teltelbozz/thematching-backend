@@ -34,6 +34,9 @@ import adminGroupsRouter from "./routes/adminGroups";
 // ★ LINE通知キュー処理  
 import cronLineDispatchRouter from "./routes/cronLineDispatch";
 
+// ★ LINE通知状態サマリ
+import adminLineNotificationsRouter from "./routes/adminLineNotifications";
+
 const app = express();
 
 // Vercel/プロキシ越しでも Secure Cookie を有効化
@@ -92,5 +95,9 @@ app.use("/cron", cronRouter);
 app.use("/cron", cronLineDispatchRouter);
 app.use("/api/cron", cronRouter); 
 app.use("/api/cron", cronLineDispatchRouter);
+
+// ★ LINE通知状態サマリ
+app.use("/admin", adminLineNotificationsRouter);
+app.use("/api/admin", adminLineNotificationsRouter);
 
 export default app;

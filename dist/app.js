@@ -32,6 +32,8 @@ const adminGroupAnnouncement_1 = __importDefault(require("./routes/adminGroupAnn
 const adminGroups_1 = __importDefault(require("./routes/adminGroups"));
 // ★ LINE通知キュー処理  
 const cronLineDispatch_1 = __importDefault(require("./routes/cronLineDispatch"));
+// ★ LINE通知状態サマリ
+const adminLineNotifications_1 = __importDefault(require("./routes/adminLineNotifications"));
 const app = (0, express_1.default)();
 // Vercel/プロキシ越しでも Secure Cookie を有効化
 app.set("trust proxy", 1);
@@ -75,4 +77,7 @@ app.use("/cron", cron_1.default);
 app.use("/cron", cronLineDispatch_1.default);
 app.use("/api/cron", cron_1.default);
 app.use("/api/cron", cronLineDispatch_1.default);
+// ★ LINE通知状態サマリ
+app.use("/admin", adminLineNotifications_1.default);
+app.use("/api/admin", adminLineNotifications_1.default);
 exports.default = app;
