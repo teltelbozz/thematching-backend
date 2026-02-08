@@ -17,28 +17,84 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
+          # ルート or frontend どちらにも lockfile があり得るので両方を見る
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
 
+      # ------------------------------------------------------------
+      # Detect dirs (backend may be repo root)
+      # ------------------------------------------------------------
+      - name: Detect backend/frontend directories
+        id: dirs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # backend は (1) backend/ があればそれ、(2) なければルートを backend とみなす
+          if [ -f "backend/package.json" ]; then
+            echo "backend_dir=backend" >> "$GITHUB_OUTPUT"
+            echo "backend_pkg=backend/package.json" >> "$GITHUB_OUTPUT"
+          elif [ -f "package.json" ]; then
+            echo "backend_dir=." >> "$GITHUB_OUTPUT"
+            echo "backend_pkg=package.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend_dir=" >> "$GITHUB_OUTPUT"
+            echo "backend_pkg=" >> "$GITHUB_OUTPUT"
+          fi
+
+          # frontend は frontend/ があればそれ
+          if [ -f "frontend/package.json" ]; then
+            echo "frontend_dir=frontend" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend_dir=" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "Detected backend_dir=$(cat $GITHUB_OUTPUT | grep backend_dir | cut -d= -f2)"
+          echo "Detected frontend_dir=$(cat $GITHUB_OUTPUT | grep frontend_dir | cut -d= -f2)"
+
+      # ------------------------------------------------------------
       # Backend
+      # ------------------------------------------------------------
       - name: Install backend deps
-        working-directory: .
+        if: ${{ steps.dirs.outputs.backend_dir != '' }}
+        working-directory: ${{ steps.dirs.outputs.backend_dir }}
         run: npm ci
 
       - name: Typecheck backend
-        working-directory: backend
+        if: ${{ steps.dirs.outputs.backend_dir != '' }}
+        working-directory: ${{ steps.dirs.outputs.backend_dir }}
         run: npm run build --silent
 
+      # ------------------------------------------------------------
       # Frontend
+      # ------------------------------------------------------------
       - name: Install frontend deps
-        working-directory: .
+        if: ${{ steps.dirs.outputs.frontend_dir != '' }}
+        working-directory: ${{ steps.dirs.outputs.frontend_dir }}
         run: npm ci
 
       - name: Typecheck & build frontend
-        working-directory: frontend
+        if: ${{ steps.dirs.outputs.frontend_dir != '' }}
+        working-directory: ${{ steps.dirs.outputs.frontend_dir }}
         run: npm run build --silent
 
-      # ルート表検査（失敗しない情報収集の例：将来は失敗条件化してもOK）
+      # ------------------------------------------------------------
+      # Static checks (grep)
+      # ------------------------------------------------------------
       - name: List route mount points (static check)
+        if: ${{ steps.dirs.outputs.backend_dir != '' }}
+        shell: bash
         run: |
-          echo "Expect: /api/auth, /api/profile mounted in backend/src/app.ts"
-          grep -n "app.use('/api/auth'" backend/src/app.ts
-          grep -n "app.use('/api/profile'" backend/src/app.ts
+          set -euo pipefail
+          BD="${{ steps.dirs.outputs.backend_dir }}"
+          APP="$BD/src/app.ts"
+
+          echo "Expect: /api/auth, /api/profile mounted in $APP"
+          test -f "$APP" || (echo "ERROR: $APP not found" && ls -la "$BD/src" && exit 1)
+
+          grep -n "app.use(\"/api/auth\"" "$APP" || true
+          grep -n "app.use('/api/auth'" "$APP" || true
+          grep -n "app.use(\"/api/profile\"" "$APP" || true
+          grep -n "app.use('/api/profile'" "$APP" || true
