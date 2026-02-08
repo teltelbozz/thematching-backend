@@ -20,7 +20,7 @@ jobs:
 
       # Backend
       - name: Install backend deps
-        working-directory: backend
+        working-directory: .
         run: npm ci
 
       - name: Typecheck backend
@@ -29,7 +29,7 @@ jobs:
 
       # Frontend
       - name: Install frontend deps
-        working-directory: frontend
+        working-directory: .
         run: npm ci
 
       - name: Typecheck & build frontend
