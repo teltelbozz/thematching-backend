@@ -5,6 +5,8 @@ import { getEntriesForSlot, getHistoryEdges } from "./repository";
 import { computeMatchesForSlot } from "./engine";
 import { saveMatchesForSlot } from "./save";
 import { assignTokensForSlot } from "./assign";
+import { enqueueLineNotificationsForSlot } from "../notifications/enqueueLineNotifications";
+import { dispatchLineNotifications } from "../notifications/dispatchLineNotifications";
 
 /**
  * 1つの slotDt に対するマッチング実行（DB読み込み → マッチング → 保存 → token付与）
@@ -48,6 +50,20 @@ export async function runMatchingForSlot(db: Pool, slotDt: string) {
     // 5. token をセット
     await assignTokensForSlot(db, slotDt, first.location, first.type_mode);
 
+    // 6. 通知キュー投入（token確定後）
+    await enqueueLineNotificationsForSlot(db, slotDt);
+
+    // 7. 即時dispatch（ベストエフォート）
+    try {
+      const dispatchResult = await dispatchLineNotifications(db, { limit: 10 });
+      const sentCount = dispatchResult.processed.filter((p: any) => p.status === "sent").length;
+      const failedCount = dispatchResult.processed.filter((p: any) => p.status === "failed").length;
+      console.log(
+        `[runMatchingForSlot] immediate line dispatch picked=${dispatchResult.picked} sent=${sentCount} failed=${failedCount}`
+      );
+    } catch (e: any) {
+      console.warn("[runMatchingForSlot] line dispatch failed (best effort):", e?.message || e);
+    }
   }
 
   return {

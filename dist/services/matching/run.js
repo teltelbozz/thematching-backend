@@ -7,6 +7,8 @@ const repository_1 = require("./repository");
 const engine_1 = require("./engine");
 const save_1 = require("./save");
 const assign_1 = require("./assign");
+const enqueueLineNotifications_1 = require("../notifications/enqueueLineNotifications");
+const dispatchLineNotifications_1 = require("../notifications/dispatchLineNotifications");
 /**
  * 1つの slotDt に対するマッチング実行（DB読み込み → マッチング → 保存 → token付与）
  */
@@ -34,6 +36,18 @@ async function runMatchingForSlot(db, slotDt) {
         await (0, save_1.saveMatchesForSlot)(db, slotDt, first.location, first.type_mode, matched);
         // 5. token をセット
         await (0, assign_1.assignTokensForSlot)(db, slotDt, first.location, first.type_mode);
+        // 6. 通知キュー投入（token確定後）
+        await (0, enqueueLineNotifications_1.enqueueLineNotificationsForSlot)(db, slotDt);
+        // 7. 即時dispatch（ベストエフォート）
+        try {
+            const dispatchResult = await (0, dispatchLineNotifications_1.dispatchLineNotifications)(db, { limit: 10 });
+            const sentCount = dispatchResult.processed.filter((p) => p.status === "sent").length;
+            const failedCount = dispatchResult.processed.filter((p) => p.status === "failed").length;
+            console.log(`[runMatchingForSlot] immediate line dispatch picked=${dispatchResult.picked} sent=${sentCount} failed=${failedCount}`);
+        }
+        catch (e) {
+            console.warn("[runMatchingForSlot] line dispatch failed (best effort):", e?.message || e);
+        }
     }
     return {
         slot: slotDt,

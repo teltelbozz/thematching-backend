@@ -1,18 +1,23 @@
 import { Router } from "express";
+import type { Request, Response } from "express";
 import { pool } from "../db";
+import { dispatchLineNotifications } from "../services/notifications/dispatchLineNotifications";
 
 const router = Router();
+
+function isAdminAuthorized(req: Request): boolean {
+  const secret = process.env.ADMIN_SECRET || process.env.CRON_SECRET;
+  const auth = req.header("authorization") || "";
+  return !!secret && auth === `Bearer ${secret}`;
+}
 
 /**
  * GET /admin/line-notifications/summary
  * - LINE通知キューのサマリ/監視用
  * - 認証: Authorization: Bearer <ADMIN_SECRET or CRON_SECRET>
  */
-router.get("/line-notifications/summary", async (req, res) => {
-  const secret = process.env.ADMIN_SECRET || process.env.CRON_SECRET;
-  const auth = req.header("authorization") || "";
-
-  if (!secret || auth !== `Bearer ${secret}`) {
+router.get("/line-notifications/summary", async (req: Request, res: Response) => {
+  if (!isAdminAuthorized(req)) {
     console.warn("[admin/line-notifications/summary] unauthorized");
     return res.status(401).json({ error: "unauthorized" });
   }
@@ -120,6 +125,29 @@ router.get("/line-notifications/summary", async (req, res) => {
     });
   } catch (e: any) {
     console.error("[admin/line-notifications/summary] error", e);
+    return res.status(500).json({ error: e?.message || "server_error" });
+  }
+});
+
+/**
+ * POST /admin/line-notifications/dispatch
+ * - 管理画面から手動でdispatch実行
+ * - 認証: Authorization: Bearer <ADMIN_SECRET or CRON_SECRET>
+ */
+router.post("/line-notifications/dispatch", async (req: Request, res: Response) => {
+  if (!isAdminAuthorized(req)) {
+    console.warn("[admin/line-notifications/dispatch] unauthorized");
+    return res.status(401).json({ error: "unauthorized" });
+  }
+
+  const limitRaw = Number(req.query.limit ?? 50);
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(Math.trunc(limitRaw), 200)) : 50;
+
+  try {
+    const result = await dispatchLineNotifications(pool, { limit });
+    return res.json(result);
+  } catch (e: any) {
+    console.error("[admin/line-notifications/dispatch] error", e);
     return res.status(500).json({ error: e?.message || "server_error" });
   }
 });
