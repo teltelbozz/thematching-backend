@@ -111,7 +111,8 @@ async function executeMatchCron(pool) {
             // ⑥ token 付与
             await (0, matching_1.assignTokensForSlot)(pool, slotDt, location, typeMode);
             // ★追加：通知キューに積む
-            await (0, enqueueLineNotifications_1.enqueueLineNotificationsForSlot)(pool, slotDt);
+            const enqueueResult = await (0, enqueueLineNotifications_1.enqueueLineNotificationsForSlot)(pool, slotDt);
+            console.log(`[cron] line enqueue inserted=${enqueueResult.inserted ?? 0} slot=${slotDt}`);
             // ★追加：即時dispatch（ベストエフォート）
             try {
                 const dispatchResult = await (0, dispatchLineNotifications_1.dispatchLineNotifications)(pool, { limit: 10 });

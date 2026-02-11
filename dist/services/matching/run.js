@@ -37,7 +37,8 @@ async function runMatchingForSlot(db, slotDt) {
         // 5. token をセット
         await (0, assign_1.assignTokensForSlot)(db, slotDt, first.location, first.type_mode);
         // 6. 通知キュー投入（token確定後）
-        await (0, enqueueLineNotifications_1.enqueueLineNotificationsForSlot)(db, slotDt);
+        const enqueueResult = await (0, enqueueLineNotifications_1.enqueueLineNotificationsForSlot)(db, slotDt);
+        console.log(`[runMatchingForSlot] line enqueue inserted=${enqueueResult.inserted ?? 0} slot=${slotDt}`);
         // 7. 即時dispatch（ベストエフォート）
         try {
             const dispatchResult = await (0, dispatchLineNotifications_1.dispatchLineNotifications)(db, { limit: 10 });

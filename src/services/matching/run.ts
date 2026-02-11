@@ -51,7 +51,10 @@ export async function runMatchingForSlot(db: Pool, slotDt: string) {
     await assignTokensForSlot(db, slotDt, first.location, first.type_mode);
 
     // 6. 通知キュー投入（token確定後）
-    await enqueueLineNotificationsForSlot(db, slotDt);
+    const enqueueResult = await enqueueLineNotificationsForSlot(db, slotDt);
+    console.log(
+      `[runMatchingForSlot] line enqueue inserted=${enqueueResult.inserted ?? 0} slot=${slotDt}`
+    );
 
     // 7. 即時dispatch（ベストエフォート）
     try {
