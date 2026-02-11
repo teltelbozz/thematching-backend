@@ -121,7 +121,7 @@ router.post("/line-notifications/dispatch", async (req, res) => {
         return res.status(401).json({ error: "unauthorized" });
     }
     const limitRaw = Number(req.query.limit ?? 50);
-    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(Math.trunc(limitRaw), 200)) : 50;
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(Math.trunc(limitRaw), 60)) : 50;
     try {
         const result = await (0, dispatchLineNotifications_1.dispatchLineNotifications)(db_1.pool, { limit });
         return res.json(result);

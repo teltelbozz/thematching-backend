@@ -141,7 +141,7 @@ router.post("/line-notifications/dispatch", async (req: Request, res: Response) 
   }
 
   const limitRaw = Number(req.query.limit ?? 50);
-  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(Math.trunc(limitRaw), 200)) : 50;
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(Math.trunc(limitRaw), 60)) : 50;
 
   try {
     const result = await dispatchLineNotifications(pool, { limit });

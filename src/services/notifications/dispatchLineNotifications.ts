@@ -55,7 +55,7 @@ export async function dispatchLineNotifications(
   }
 
   const limitRaw = Number(opts?.limit ?? 50);
-  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(Math.trunc(limitRaw), 200)) : 50;
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(Math.trunc(limitRaw), 60)) : 50;
 
   const client = await pool.connect();
   const processed: DispatchProcessedItem[] = [];
@@ -70,7 +70,8 @@ export async function dispatchLineNotifications(
         FROM line_notifications
         WHERE status IN ('pending', 'failed')
           AND next_retry_at <= now()
-        ORDER BY id
+          AND line_user_id ~ '^U[0-9A-Fa-f]{32}$'
+        ORDER BY next_retry_at ASC, id DESC
         LIMIT $1
         FOR UPDATE SKIP LOCKED
       )
@@ -154,9 +155,13 @@ export async function dispatchLineNotifications(
         });
       } catch (e: any) {
         const nextAttempts = Number(n.attempts || 0) + 1;
-        const nextRetryAt = computeNextRetry(nextAttempts);
         const msg = String(e?.message || e);
         const lineHttpStatus = parseLineHttpStatus(msg);
+        const invalidTo = lineHttpStatus === 400 && msg.includes("'to'");
+        const nextRetryAt = invalidTo
+          ? new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+          : computeNextRetry(nextAttempts);
+        const errorBody = invalidTo ? `line_push_permanent:${msg}` : msg;
 
         await pool.query(
           `
@@ -167,7 +172,7 @@ export async function dispatchLineNotifications(
               last_error = $4
           WHERE id = $1
           `,
-          [n.id, nextAttempts, nextRetryAt.toISOString(), msg.slice(0, 2000)]
+          [n.id, nextAttempts, nextRetryAt.toISOString(), errorBody.slice(0, 2000)]
         );
 
         processed.push({
@@ -177,7 +182,7 @@ export async function dispatchLineNotifications(
           userId: n.user_id,
           lineUserIdMasked: maskLineUserId(n.line_user_id),
           attempts: nextAttempts,
-          errorHead: msg.slice(0, 160),
+          errorHead: errorBody.slice(0, 160),
           lineHttpStatus,
         });
       }
