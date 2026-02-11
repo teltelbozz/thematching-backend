@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.executeMatchCron = executeMatchCron;
 const matching_1 = require("../services/matching");
 const enqueueLineNotifications_1 = require("../services/notifications/enqueueLineNotifications");
+const dispatchLineNotifications_1 = require("../services/notifications/dispatchLineNotifications");
 // JST 日付を YYYY-MM-DD 形式で取得
 function getJstDateKey(offsetDays = 1) {
     const now = new Date(Date.now() + 9 * 3600 * 1000); // JST
@@ -111,6 +112,16 @@ async function executeMatchCron(pool) {
             await (0, matching_1.assignTokensForSlot)(pool, slotDt, location, typeMode);
             // ★追加：通知キューに積む
             await (0, enqueueLineNotifications_1.enqueueLineNotificationsForSlot)(pool, slotDt);
+            // ★追加：即時dispatch（ベストエフォート）
+            try {
+                const dispatchResult = await (0, dispatchLineNotifications_1.dispatchLineNotifications)(pool, { limit: 10 });
+                const sentCount = dispatchResult.processed.filter((p) => p.status === "sent").length;
+                const failedCount = dispatchResult.processed.filter((p) => p.status === "failed").length;
+                console.log(`[cron] immediate line dispatch slot=${slotDt} picked=${dispatchResult.picked} sent=${sentCount} failed=${failedCount}`);
+            }
+            catch (e) {
+                console.warn(`[cron] immediate line dispatch failed (best effort) slot=${slotDt}:`, e?.message || e);
+            }
             results.push({
                 slotDt,
                 matchedCount: matched.length,

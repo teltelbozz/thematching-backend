@@ -9,6 +9,7 @@ import {
   assignTokensForSlot,
 } from "../services/matching";
 import { enqueueLineNotificationsForSlot } from "../services/notifications/enqueueLineNotifications";
+import { dispatchLineNotifications } from "../services/notifications/dispatchLineNotifications";
 
 
 // JST 日付を YYYY-MM-DD 形式で取得
@@ -161,6 +162,21 @@ export async function executeMatchCron(pool: Pool) {
 
       // ★追加：通知キューに積む
       await enqueueLineNotificationsForSlot(pool, slotDt);
+
+      // ★追加：即時dispatch（ベストエフォート）
+      try {
+        const dispatchResult = await dispatchLineNotifications(pool, { limit: 10 });
+        const sentCount = dispatchResult.processed.filter((p: any) => p.status === "sent").length;
+        const failedCount = dispatchResult.processed.filter((p: any) => p.status === "failed").length;
+        console.log(
+          `[cron] immediate line dispatch slot=${slotDt} picked=${dispatchResult.picked} sent=${sentCount} failed=${failedCount}`
+        );
+      } catch (e: any) {
+        console.warn(
+          `[cron] immediate line dispatch failed (best effort) slot=${slotDt}:`,
+          e?.message || e
+        );
+      }
 
       results.push({
         slotDt,
