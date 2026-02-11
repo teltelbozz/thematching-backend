@@ -1,16 +1,54 @@
 import type { Pool } from "pg";
 import { pushLineText } from "../../lib/linePush";
 
+type DispatchRow = {
+  id: number;
+  group_id: number | null;
+  user_id: number | null;
+  line_user_id: string | null;
+  message_text: string;
+  attempts: number | null;
+};
+
+type DispatchProcessedItem = {
+  id: number;
+  status: "sent" | "failed";
+  groupId: number | null;
+  userId: number | null;
+  lineUserIdMasked: string | null;
+  attempts?: number;
+  errorHead?: string;
+  lineHttpStatus?: number | null;
+};
+
 function computeNextRetry(attempts: number) {
   const minutes = [1, 5, 30, 180, 720, 1440];
   const idx = Math.min(Math.max(attempts - 1, 0), minutes.length - 1);
   return new Date(Date.now() + minutes[idx] * 60 * 1000);
 }
 
+function maskLineUserId(v: string | null): string | null {
+  if (!v) return null;
+  if (v.length <= 10) return v;
+  return `${v.slice(0, 5)}...${v.slice(-4)}`;
+}
+
+function looksLikeLineUserId(v: string | null): boolean {
+  if (!v) return false;
+  return /^U[a-fA-F0-9]{32}$/.test(v);
+}
+
+function parseLineHttpStatus(msg: string): number | null {
+  const m = msg.match(/^line_push_failed:(\d{3}):/);
+  if (!m) return null;
+  const code = Number(m[1]);
+  return Number.isFinite(code) ? code : null;
+}
+
 export async function dispatchLineNotifications(
   pool: Pool,
   opts?: { limit?: number }
-): Promise<{ ok: true; picked: number; processed: any[] }> {
+): Promise<{ ok: true; picked: number; processed: DispatchProcessedItem[] }> {
   const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
   if (!accessToken) {
     throw new Error("line_access_token_not_configured");
@@ -20,12 +58,12 @@ export async function dispatchLineNotifications(
   const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(Math.trunc(limitRaw), 200)) : 50;
 
   const client = await pool.connect();
-  const processed: any[] = [];
+  const processed: DispatchProcessedItem[] = [];
 
   try {
     await client.query("BEGIN");
 
-    const pick = await client.query(
+    const pick = await client.query<DispatchRow>(
       `
       WITH picked AS (
         SELECT id
@@ -47,8 +85,55 @@ export async function dispatchLineNotifications(
 
     await client.query("COMMIT");
 
-    for (const n of pick.rows) {
+    const pickedRows = pick.rows;
+    const pickedLikelyReal = pickedRows.filter((r) => looksLikeLineUserId(r.line_user_id)).length;
+    const pickedLikelyDummy = pickedRows.length - pickedLikelyReal;
+    const pickedSample = pickedRows.slice(0, 5).map((r) => ({
+      id: r.id,
+      groupId: r.group_id,
+      userId: r.user_id,
+      lineUserIdMasked: maskLineUserId(r.line_user_id),
+      likelyRealLineId: looksLikeLineUserId(r.line_user_id),
+      attempts: Number(r.attempts || 0),
+    }));
+    console.log(
+      `[dispatchLineNotifications] pick-summary picked=${pickedRows.length} likelyReal=${pickedLikelyReal} likelyDummyOrInvalid=${pickedLikelyDummy} sample=${JSON.stringify(
+        pickedSample
+      )}`
+    );
+
+    for (const n of pickedRows) {
       try {
+        if (!n.line_user_id) {
+          const nextAttempts = Number(n.attempts || 0) + 1;
+          const nextRetryAt = computeNextRetry(nextAttempts);
+          const msg = "line_user_id_missing";
+
+          await pool.query(
+            `
+            UPDATE line_notifications
+            SET status = 'failed',
+                attempts = $2,
+                next_retry_at = $3,
+                last_error = $4
+            WHERE id = $1
+            `,
+            [n.id, nextAttempts, nextRetryAt.toISOString(), msg]
+          );
+
+          processed.push({
+            id: n.id,
+            status: "failed",
+            groupId: n.group_id,
+            userId: n.user_id,
+            lineUserIdMasked: null,
+            attempts: nextAttempts,
+            errorHead: msg,
+            lineHttpStatus: null,
+          });
+          continue;
+        }
+
         await pushLineText(accessToken, n.line_user_id, n.message_text);
 
         await pool.query(
@@ -60,11 +145,18 @@ export async function dispatchLineNotifications(
           [n.id]
         );
 
-        processed.push({ id: n.id, status: "sent" });
+        processed.push({
+          id: n.id,
+          status: "sent",
+          groupId: n.group_id,
+          userId: n.user_id,
+          lineUserIdMasked: maskLineUserId(n.line_user_id),
+        });
       } catch (e: any) {
         const nextAttempts = Number(n.attempts || 0) + 1;
         const nextRetryAt = computeNextRetry(nextAttempts);
         const msg = String(e?.message || e);
+        const lineHttpStatus = parseLineHttpStatus(msg);
 
         await pool.query(
           `
@@ -78,14 +170,38 @@ export async function dispatchLineNotifications(
           [n.id, nextAttempts, nextRetryAt.toISOString(), msg.slice(0, 2000)]
         );
 
-        processed.push({ id: n.id, status: "failed", attempts: nextAttempts });
+        processed.push({
+          id: n.id,
+          status: "failed",
+          groupId: n.group_id,
+          userId: n.user_id,
+          lineUserIdMasked: maskLineUserId(n.line_user_id),
+          attempts: nextAttempts,
+          errorHead: msg.slice(0, 160),
+          lineHttpStatus,
+        });
       }
     }
 
     const sentCount = processed.filter((p) => p.status === "sent").length;
     const failedCount = processed.filter((p) => p.status === "failed").length;
+    const failedByStatus: Record<string, number> = {};
+    for (const p of processed) {
+      if (p.status !== "failed") continue;
+      const key = p.lineHttpStatus == null ? "unknown" : String(p.lineHttpStatus);
+      failedByStatus[key] = (failedByStatus[key] || 0) + 1;
+    }
+    const failedSamples = processed.filter((p) => p.status === "failed").slice(0, 3).map((p) => ({
+      id: p.id,
+      userId: p.userId,
+      lineUserIdMasked: p.lineUserIdMasked,
+      lineHttpStatus: p.lineHttpStatus ?? "unknown",
+      errorHead: p.errorHead,
+    }));
     console.log(
-      `[dispatchLineNotifications] picked=${pick.rowCount ?? 0} sent=${sentCount} failed=${failedCount}`
+      `[dispatchLineNotifications] picked=${pick.rowCount ?? 0} sent=${sentCount} failed=${failedCount} failedByStatus=${JSON.stringify(
+        failedByStatus
+      )} failedSamples=${JSON.stringify(failedSamples)}`
     );
 
     return { ok: true, picked: pick.rowCount ?? 0, processed };
@@ -96,4 +212,3 @@ export async function dispatchLineNotifications(
     client.release();
   }
 }
-
